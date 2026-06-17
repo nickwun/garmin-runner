@@ -34,6 +34,17 @@ def render_daily_report(analysis: SingleActivityAnalysis) -> str:
         f"- {ZONE_LABELS[key]}：{_format_duration(seconds)}"
         for key, seconds in analysis.hr_zones.seconds_by_zone.items()
     )
+    confidence_reasons = "\n".join(
+        f"- {reason}" for reason in analysis.confidence.reasons
+    ) or "- 无"
+    not_applicable_notes = "\n".join(
+        f"- {note}" for note in analysis.not_applicable_notes
+    ) or "- 无"
+    drift_line = (
+        f"- 心率漂移：{analysis.heart_rate_drift.label}（{_format_float(analysis.heart_rate_drift.drift_pct, '%')}）"
+        if analysis.heart_rate_drift.applicable
+        else f"- 心率漂移：{analysis.heart_rate_drift.label}（{analysis.heart_rate_drift.reason or '不适用于本次训练'}）"
+    )
     return f"""# {basic.activity_date.isoformat()} 单次训练报告
 
 活动：{basic.activity_name or basic.activity_id}
@@ -42,25 +53,49 @@ def render_daily_report(analysis: SingleActivityAnalysis) -> str:
 
 - 距离：{_format_float(basic.distance_km, " km")}
 - 时间：{_format_duration(basic.duration_s)}
+- 移动时间：{_format_duration(basic.moving_duration_s)}
 - 平均配速：{_format_pace(basic.average_pace_s_per_km)}
 - 平均心率：{_format_float(basic.average_hr, " bpm")}
 - 最大心率：{_format_float(basic.max_hr, " bpm")}
 - 爬升：{_format_float(basic.elevation_gain_m, " m")}
 - 步频：{_format_float(basic.average_cadence_spm, " spm")}
+- 数据可信度：{analysis.confidence.level}
+
+数据可信度说明：
+{confidence_reasons}
 
 ## 生理面
 
 - 训练类型：{analysis.training_type}
 - 配速稳定性：{analysis.pace_stability.label}（CV {_format_float(analysis.pace_stability.cv_pct, "%")}）
-- 心率漂移：{analysis.heart_rate_drift.label}（{_format_float(analysis.heart_rate_drift.drift_pct, "%")}）
+- 后半程配速变化：{_format_float(analysis.pace_stability.late_slowdown_pct, "%")}
+{drift_line}
 
 {zone_lines}
+
+## 不适用指标说明
+
+{not_applicable_notes}
 
 ## 执行打分
 
 {analysis.execution_score} / 100
 
 ## 教练指令
+
+### 明日训练建议
+
+{analysis.guidance.tomorrow}
+
+### 未来 48-72 小时建议
+
+{analysis.guidance.next_48_72_hours}
+
+### 禁止事项
+
+{analysis.guidance.prohibited}
+
+### 规则说明
 
 {analysis.coach_instruction}
 """

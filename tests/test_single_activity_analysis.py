@@ -129,6 +129,7 @@ def test_daily_report_uses_required_path_and_sections(tmp_path: Path) -> None:
         "startTimeLocal": "2026-06-01T06:30:00",
         "distance": 3000.0,
         "duration": 1200.0,
+        "movingDuration": 1188.0,
         "averageHR": 118,
         "maxHR": 132,
     }
@@ -157,6 +158,7 @@ def test_daily_report_uses_required_path_and_sections(tmp_path: Path) -> None:
     assert report_path == tmp_path / "daily" / "2026-06-01_12345.md"
     content = report_path.read_text(encoding="utf-8")
     assert "## 数据面" in content
+    assert "移动时间：19:48" in content
     assert "## 生理面" in content
     assert "## 执行打分" in content
     assert "## 教练指令" in content
@@ -220,6 +222,152 @@ def test_long_run_uses_distance_and_duration_thresholds_together() -> None:
     )
 
     assert analysis.training_type == "长距离"
+
+
+def test_heart_rate_zone_time_ignores_long_pause_gaps() -> None:
+    summary = {
+        "activityId": "pause-gap",
+        "activityName": "福州市 跑步",
+        "startTimeLocal": "2026-06-18T05:47:22",
+        "distance": 1000.0,
+        "duration": 120.0,
+        "averageHR": 150,
+    }
+    points = _points(
+        [
+            (0, 0, 145, 3.0),
+            (60, 180, 145, 3.0),
+            (660, 182, 150, 3.0),
+            (720, 362, 150, 3.0),
+        ]
+    )
+
+    analysis = analyze_activity(summary, points, _training_config_from_image())
+
+    assert sum(analysis.hr_zones.seconds_by_zone.values()) == 120.0
+    assert analysis.confidence.level == "medium"
+    assert any("暂停" in reason for reason in analysis.confidence.reasons)
+
+
+def test_heart_rate_drift_is_not_applicable_for_interval_workouts() -> None:
+    summary = {
+        "activityId": "interval",
+        "activityName": "福州市 - 5×2 公里",
+        "startTimeLocal": "2026-06-18T05:47:22",
+        "distance": 12000.0,
+        "duration": 3600.0,
+        "averageHR": 150,
+        "maxHR": 176,
+    }
+
+    analysis = analyze_activity(
+        summary,
+        _steady_points(distance_m=12000.0, duration_s=3600.0, heart_rate=150),
+        _training_config_from_image(),
+    )
+
+    assert analysis.training_type == "阈值课"
+    assert analysis.heart_rate_drift.applicable is False
+    assert analysis.heart_rate_drift.drift_pct is None
+    assert "不适用" in analysis.heart_rate_drift.label
+    assert any("心率漂移" in note for note in analysis.not_applicable_notes)
+
+
+def test_missing_fit_fields_lower_analysis_confidence() -> None:
+    summary = {
+        "activityId": "missing-fields",
+        "activityName": "福州市 跑步",
+        "startTimeLocal": "2026-06-18T05:47:22",
+        "duration": 1200.0,
+    }
+    points = [
+        TimeSeriesPoint(
+            timestamp=datetime(2026, 6, 18, 6, 0, 0) + timedelta(seconds=i * 60),
+            elapsed_s=float(i * 60),
+            distance_m=None,
+            heart_rate_bpm=None,
+            speed_mps=None,
+            cadence_spm=None,
+            altitude_m=None,
+        )
+        for i in range(5)
+    ]
+
+    analysis = analyze_activity(summary, points, _training_config_from_image())
+
+    assert analysis.confidence.level == "low"
+    assert any("心率" in reason for reason in analysis.confidence.reasons)
+    assert any("距离" in reason for reason in analysis.confidence.reasons)
+    assert any("速度" in reason for reason in analysis.confidence.reasons)
+
+
+def test_easy_runs_are_not_penalized_for_slow_pace() -> None:
+    summary = {
+        "activityId": "slow-easy",
+        "activityName": "福州市 跑步",
+        "startTimeLocal": "2026-06-18T05:47:22",
+        "distance": 6000.0,
+        "duration": 3600.0,
+        "averageHR": 128,
+        "maxHR": 132,
+    }
+
+    analysis = analyze_activity(
+        summary,
+        _steady_points(distance_m=6000.0, duration_s=3600.0, heart_rate=128),
+        _training_config_from_image(),
+    )
+
+    assert analysis.training_type == "E 跑"
+    assert analysis.execution_score >= 90
+
+
+def test_easy_plan_run_as_steady_gets_penalized() -> None:
+    summary = {
+        "activityId": "easy-too-hard",
+        "activityName": "Easy run",
+        "startTimeLocal": "2026-06-18T05:47:22",
+        "distance": 8000.0,
+        "duration": 3000.0,
+        "averageHR": 160,
+        "maxHR": 168,
+    }
+
+    analysis = analyze_activity(
+        summary,
+        _steady_points(distance_m=8000.0, duration_s=3000.0, heart_rate=160),
+        _training_config_from_image(),
+    )
+
+    assert analysis.training_type == "轻松跑跑成稳态"
+    assert analysis.execution_score < 80
+    assert "轻松" in analysis.guidance.prohibited
+
+
+def test_report_includes_confidence_applicability_and_guidance(tmp_path: Path) -> None:
+    summary = {
+        "activityId": "interval-report",
+        "activityName": "福州市 - 5×2 公里",
+        "startTimeLocal": "2026-06-18T05:47:22",
+        "distance": 12000.0,
+        "duration": 3600.0,
+        "averageHR": 150,
+    }
+
+    analysis = analyze_activity(
+        summary,
+        _steady_points(distance_m=12000.0, duration_s=3600.0, heart_rate=150),
+        _training_config_from_image(),
+    )
+
+    report_path = write_daily_report(analysis, tmp_path)
+    content = report_path.read_text(encoding="utf-8")
+
+    assert "数据可信度" in content
+    assert "不适用指标说明" in content
+    assert "明日训练建议" in content
+    assert "未来 48-72 小时建议" in content
+    assert "禁止事项" in content
 
 
 def _points(rows: list[tuple[int, float, int, float]]) -> list[TimeSeriesPoint]:

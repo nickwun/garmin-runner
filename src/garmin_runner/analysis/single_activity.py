@@ -5,6 +5,9 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Any
 
+PAUSE_GAP_SECONDS = 30.0
+PAUSE_GAP_MAX_DISTANCE_M = 10.0
+
 
 @dataclass(frozen=True)
 class HeartRateZones:
@@ -46,6 +49,7 @@ class BasicMetrics:
     activity_date: date
     distance_km: float | None
     duration_s: float | None
+    moving_duration_s: float | None
     average_pace_s_per_km: float | None
     average_hr: float | None
     max_hr: float | None
@@ -62,6 +66,7 @@ class HeartRateZoneSummary:
 class PaceStability:
     cv_pct: float | None
     label: str
+    late_slowdown_pct: float | None = None
 
 
 @dataclass(frozen=True)
@@ -70,6 +75,21 @@ class HeartRateDrift:
     second_half_pace_hr_ratio: float | None
     drift_pct: float | None
     label: str
+    applicable: bool = True
+    reason: str | None = None
+
+
+@dataclass(frozen=True)
+class AnalysisConfidence:
+    level: str
+    reasons: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class TrainingGuidance:
+    tomorrow: str
+    next_48_72_hours: str
+    prohibited: str
 
 
 @dataclass(frozen=True)
@@ -81,6 +101,9 @@ class SingleActivityAnalysis:
     training_type: str
     execution_score: int
     coach_instruction: str
+    confidence: AnalysisConfidence
+    not_applicable_notes: tuple[str, ...]
+    guidance: TrainingGuidance
 
 
 def training_config_from_settings(settings: Any) -> TrainingConfig:
@@ -112,10 +135,15 @@ def analyze_activity(
     basic = _basic_metrics(summary, points)
     hr_zones = _hr_zone_summary(points, config.heart_rate_zones)
     pace_stability = _pace_stability(points)
-    drift = _heart_rate_drift(points)
     training_type = _classify_training(summary, basic, hr_zones, pace_stability, config)
-    execution_score = _score_execution(training_type, hr_zones, pace_stability, drift)
-    instruction = _coach_instruction(training_type, execution_score, pace_stability, drift)
+    drift = _heart_rate_drift(summary, points, training_type, pace_stability)
+    confidence = _analysis_confidence(summary, basic, points, pace_stability, training_type)
+    not_applicable_notes = _not_applicable_notes(drift, confidence)
+    execution_score = _score_execution(
+        training_type, hr_zones, pace_stability, drift, confidence
+    )
+    guidance = _training_guidance(training_type, execution_score, pace_stability, drift)
+    instruction = _coach_instruction(guidance, pace_stability, drift, confidence)
     return SingleActivityAnalysis(
         basic=basic,
         hr_zones=hr_zones,
@@ -124,6 +152,9 @@ def analyze_activity(
         training_type=training_type,
         execution_score=execution_score,
         coach_instruction=instruction,
+        confidence=confidence,
+        not_applicable_notes=not_applicable_notes,
+        guidance=guidance,
     )
 
 
@@ -131,6 +162,11 @@ def _basic_metrics(summary: dict[str, Any], points: list[TimeSeriesPoint]) -> Ba
     values = _summary_values(summary)
     distance_m = _number(values.get("distance")) or _last_number([p.distance_m for p in points])
     duration_s = _number(values.get("duration")) or _duration_from_points(points)
+    moving_duration_s = _number(
+        values.get("movingDuration")
+        or values.get("moving_duration")
+        or values.get("movingDurationInSeconds")
+    )
     distance_km = distance_m / 1000 if distance_m else None
     average_pace = duration_s / distance_km if duration_s and distance_km else None
     activity_date = _activity_date(values.get("startTimeLocal"))
@@ -140,6 +176,7 @@ def _basic_metrics(summary: dict[str, Any], points: list[TimeSeriesPoint]) -> Ba
         activity_date=activity_date,
         distance_km=distance_km,
         duration_s=duration_s,
+        moving_duration_s=moving_duration_s,
         average_pace_s_per_km=average_pace,
         average_hr=_number(values.get("averageHR") or values.get("avgHR"))
         or _average([p.heart_rate_bpm for p in points]),
@@ -174,10 +211,9 @@ def _hr_zone_summary(
         "vo2": 0.0,
         "sprint": 0.0,
     }
-    for previous, current in zip(points, points[1:]):
+    for previous, current, duration, _distance in _valid_segments(points):
         if previous.heart_rate_bpm is None:
             continue
-        duration = max(0.0, current.elapsed_s - previous.elapsed_s)
         seconds[_zone_name(previous.heart_rate_bpm, zones)] += duration
     return HeartRateZoneSummary(seconds_by_zone=seconds)
 
@@ -203,23 +239,34 @@ def _zone_name(heart_rate: float, zones: HeartRateZones) -> str:
 
 
 def _pace_stability(points: list[TimeSeriesPoint]) -> PaceStability:
-    paces = _segment_paces(points)
+    paces = _split_paces(points)
     if len(paces) < 2:
-        return PaceStability(cv_pct=None, label="数据不足")
+        return PaceStability(cv_pct=None, label="数据不足", late_slowdown_pct=None)
     mean = statistics.fmean(paces)
     cv = statistics.pstdev(paces) / mean * 100 if mean else None
+    slowdown = _late_slowdown(points)
     if cv is None:
         label = "数据不足"
     elif cv <= 5:
         label = "稳定"
     elif cv <= 10:
         label = "轻微波动"
+    elif cv <= 18:
+        label = "有波动"
     else:
         label = "波动较大"
-    return PaceStability(cv_pct=cv, label=label)
+    return PaceStability(cv_pct=cv, label=label, late_slowdown_pct=slowdown)
 
 
-def _heart_rate_drift(points: list[TimeSeriesPoint]) -> HeartRateDrift:
+def _heart_rate_drift(
+    summary: dict[str, Any],
+    points: list[TimeSeriesPoint],
+    training_type: str,
+    pace_stability: PaceStability,
+) -> HeartRateDrift:
+    if _drift_not_applicable(summary, training_type, pace_stability):
+        reason = "间歇课、比赛或明显变速课不使用全程前后半心率漂移判断"
+        return HeartRateDrift(None, None, None, "不适用", applicable=False, reason=reason)
     if len(points) < 3:
         return HeartRateDrift(None, None, None, "数据不足")
     midpoint = points[0].elapsed_s + (points[-1].elapsed_s - points[0].elapsed_s) / 2
@@ -251,6 +298,7 @@ def _classify_training(
     pct = {key: value / total_zone_time for key, value in hr_zones.seconds_by_zone.items()}
     hard_pct = pct["threshold"] + pct["vo2"] + pct["sprint"]
     avg_hr = basic.average_hr
+    planned_easy = _name_has_any(name, ("easy", "轻松", "e跑", "e 跑", "recovery", "恢复"))
 
     if any(keyword in name for keyword in ("race", "比赛", "半马", "马拉松", "10k", "5k")):
         return "比赛"
@@ -271,6 +319,12 @@ def _classify_training(
     if hard_pct >= 0.30:
         return "阈值课"
     if avg_hr is not None:
+        if planned_easy and avg_hr > config.heart_rate_zones.aerobic_high:
+            if avg_hr <= config.heart_rate_zones.steady_high:
+                return "轻松跑跑成稳态"
+            return "轻松跑跑成质量课"
+        if "maf" in name and avg_hr <= config.heart_rate_zones.easy_high:
+            return "MAF 跑"
         if avg_hr < config.heart_rate_zones.easy_low:
             return "恢复跑" if distance <= 8 and duration <= 45 * 60 else "E 跑"
         if avg_hr <= config.heart_rate_zones.easy_high:
@@ -296,61 +350,155 @@ def _score_execution(
     hr_zones: HeartRateZoneSummary,
     pace_stability: PaceStability,
     drift: HeartRateDrift,
+    confidence: AnalysisConfidence,
 ) -> int:
     score = 100.0
-    if pace_stability.cv_pct is not None:
-        score -= min(22.0, max(0.0, pace_stability.cv_pct - 5) * 2.0)
-    if drift.drift_pct is not None:
-        score -= min(25.0, max(0.0, drift.drift_pct - 3) * 2.5)
-
     total = sum(hr_zones.seconds_by_zone.values()) or 1
     pct = {key: value / total for key, value in hr_zones.seconds_by_zone.items()}
-    if training_type in {"恢复跑", "E 跑", "普通中长距离有氧"}:
-        score -= (pct["threshold"] + pct["vo2"] + pct["sprint"]) * 35
+    easy_types = {"恢复跑", "MAF 跑", "E 跑"}
+    hard_pct = pct["threshold"] + pct["vo2"] + pct["sprint"]
+    above_easy_pct = (
+        pct["aerobic"]
+        + pct["steady"]
+        + pct["mp_bridge"]
+        + pct["threshold"]
+        + pct["vo2"]
+        + pct["sprint"]
+    )
+
+    if training_type in easy_types:
+        score -= max(0.0, above_easy_pct - 0.08) * 45
+        score -= hard_pct * 45
+        if drift.applicable and drift.drift_pct is not None:
+            score -= min(12.0, max(0.0, drift.drift_pct - 7) * 1.5)
+        if pace_stability.cv_pct is not None:
+            score -= min(6.0, max(0.0, pace_stability.cv_pct - 18) * 0.5)
+    elif training_type == "轻松跑跑成稳态":
+        score -= 28
+        score -= (pct["mp_bridge"] + hard_pct) * 35
+    elif training_type == "长距离":
+        if drift.applicable and drift.drift_pct is not None:
+            score -= min(25.0, max(0.0, drift.drift_pct - 5) * 3.0)
+        if pace_stability.late_slowdown_pct is not None:
+            score -= min(20.0, max(0.0, pace_stability.late_slowdown_pct - 5) * 2.0)
+        score -= hard_pct * 30
+    elif training_type in {"中长有氧 / 稍稳有氧", "稳态跑", "马配桥梁"}:
+        score -= max(0.0, hard_pct - 0.08) * 45
+        if drift.applicable and drift.drift_pct is not None:
+            score -= min(15.0, max(0.0, drift.drift_pct - 7) * 2.0)
+        if pace_stability.cv_pct is not None:
+            score -= min(10.0, max(0.0, pace_stability.cv_pct - 15) * 0.8)
+    elif training_type in {"阈值课", "间歇课"}:
+        target_pct = pct["steady"] + pct["mp_bridge"] + pct["threshold"]
+        easyish_pct = pct["below_range"] + pct["very_easy"] + pct["easy"]
+        score -= max(0.0, 0.65 - target_pct) * 45
+        score -= max(0.0, easyish_pct - 0.25) * 50
+        if pace_stability.cv_pct is not None:
+            score -= min(10.0, max(0.0, pace_stability.cv_pct - 12) * 0.4)
+        if pct.get("below_range", 0) > 0.35:
+            score -= (pct.get("below_range", 0) - 0.35) * 20
+        if hard_pct > 0.45:
+            score -= (hard_pct - 0.45) * 20
+    else:
+        if pace_stability.cv_pct is not None:
+            score -= min(12.0, max(0.0, pace_stability.cv_pct - 15) * 0.8)
+        if drift.applicable and drift.drift_pct is not None:
+            score -= min(15.0, max(0.0, drift.drift_pct - 7) * 2.0)
+
     if training_type in {"阈值课", "间歇课"} and pct.get("below_range", 0) > 0.30:
         score -= (pct.get("below_range", 0) - 0.30) * 20
+    if confidence.level == "low":
+        score -= 5
     return max(0, min(100, round(score)))
 
 
 def _coach_instruction(
+    guidance: TrainingGuidance,
+    stability: PaceStability,
+    drift: HeartRateDrift,
+    confidence: AnalysisConfidence,
+) -> str:
+    notes: list[str] = []
+    if confidence.level != "high":
+        notes.append("本次数据可信度下降，所有结论优先当作训练复盘线索，不作为单次定论。")
+    if stability.cv_pct is not None and stability.cv_pct > 18:
+        notes.append("配速波动较大，请先确认是否包含暂停、红绿灯或结构化变速。")
+    if drift.applicable and drift.drift_pct is not None and drift.drift_pct > 7:
+        notes.append("心率漂移明显，近期有氧耐力、补给或恢复可能不足。")
+    if not notes:
+        notes.append("本次建议主要依据训练类型、心率分布、配速稳定性和数据可信度生成。")
+    return " ".join(notes)
+
+
+def _training_guidance(
     training_type: str,
     score: int,
     stability: PaceStability,
     drift: HeartRateDrift,
-) -> str:
-    notes: list[str] = []
+) -> TrainingGuidance:
     if training_type in {"恢复跑", "E 跑"}:
-        notes.append("下一次同类训练继续把强度压在目标有氧区间，宁可慢一点，也不要后程追配速。")
-    elif training_type == "普通中长距离有氧":
-        notes.append("下一次同类训练保持有氧可控，重点看后半程心率和步频是否稳定。")
+        tomorrow = "安排休息或 30-50 分钟轻松有氧，心率继续压在恢复/E 跑区间。"
+        future = "保持有氧频率；如果腿感轻松，可在 48-72 小时后安排一次小剂量节奏训练。"
+        prohibited = "不要因为配速慢而补强度，不要在后程追配速。"
+    elif training_type == "MAF 跑":
+        tomorrow = "优先轻松恢复，继续用低心率确认身体状态。"
+        future = "48-72 小时内可继续低心率跑，暂不急着加入阈值刺激。"
+        prohibited = "不要用速度评价本次训练好坏。"
+    elif training_type == "轻松跑跑成稳态":
+        tomorrow = "改为恢复日或完全休息，把心率重新压回恢复区间。"
+        future = "未来 48-72 小时避免连续质量刺激，等主观疲劳下降后再恢复结构化训练。"
+        prohibited = "不要把原计划轻松跑继续跑成稳态或阈值。"
     elif training_type in {"中长有氧 / 稍稳有氧", "稳态跑", "马配桥梁"}:
-        notes.append("下一次同类训练保持节奏感，但不要把有氧训练跑成阈值课。")
+        tomorrow = "安排轻松跑或休息，观察腿部和晨起心率。"
+        future = "48-72 小时内可做一次短有氧或技术跑，质量课视恢复情况再定。"
+        prohibited = "不要连续两天把有氧跑进阈值以上。"
     elif training_type in {"阈值课", "间歇课"}:
-        notes.append("下一次质量课先保证热身充分，主训练段保持可控，不用把最后一组跑成冲刺。")
+        tomorrow = "安排恢复跑或休息，不再叠加强度。"
+        future = "未来 48-72 小时以恢复和低强度有氧为主，下一次质量课至少隔一天。"
+        prohibited = "不要用全程平均配速评价间歇质量，不要补跑额外强度。"
     elif training_type == "长距离":
-        notes.append("下一次长距离优先稳定补给和后半程心率，目标是跑完后仍有余量。")
+        tomorrow = "优先休息或 30-40 分钟恢复跑。"
+        future = "未来 48-72 小时关注睡眠、补给和腿部恢复，再决定是否恢复节奏训练。"
+        prohibited = "不要在恢复不足时安排阈值课；不要忽视后半程心率漂移和配速掉速。"
     elif training_type == "比赛":
-        notes.append("赛后优先恢复，至少安排一到两天轻松跑或休息，再恢复结构化训练。")
+        tomorrow = "赛后优先恢复，至少安排休息或极轻松活动。"
+        future = "未来 48-72 小时只看恢复，不急于恢复训练计划。"
+        prohibited = "不要用比赛后疲劳状态继续堆量或补课。"
     else:
-        notes.append("下一次训练保持轻松可控，以完成质量和恢复状态为第一目标。")
-
-    if stability.cv_pct is not None and stability.cv_pct > 10:
-        notes.append("本次配速波动偏大，下一次用更明确的分段目标控制节奏。")
-    if drift.drift_pct is not None and drift.drift_pct > 7:
-        notes.append("心率漂移明显，近期有氧耐力或补给恢复可能不足，下一次降低强度。")
+        tomorrow = "安排轻松可控训练，以恢复状态为第一目标。"
+        future = "未来 48-72 小时根据疲劳和睡眠调整训练强度。"
+        prohibited = "不要同时追心率、配速和距离。"
     if score < 70:
-        notes.append("执行分偏低，下一次只保留一个训练目标，避免同时追心率、配速和距离。")
-    return " ".join(notes)
+        prohibited += " 本次执行分偏低，下一次只保留一个训练目标。"
+    return TrainingGuidance(
+        tomorrow=tomorrow,
+        next_48_72_hours=future,
+        prohibited=prohibited,
+    )
 
 
 def _segment_paces(points: list[TimeSeriesPoint]) -> list[float]:
     paces: list[float] = []
-    for previous, current in zip(points, points[1:]):
-        duration = current.elapsed_s - previous.elapsed_s
-        distance = _segment_distance(previous, current)
-        if duration <= 0 or distance <= 0:
-            continue
+    for _previous, _current, duration, distance in _valid_segments(points):
         paces.append(duration / (distance / 1000))
+    return paces
+
+
+def _split_paces(points: list[TimeSeriesPoint], split_m: float = 1000.0) -> list[float]:
+    paces: list[float] = []
+    acc_duration = 0.0
+    acc_distance = 0.0
+    for _previous, _current, duration, distance in _valid_segments(points):
+        if distance <= 0:
+            continue
+        acc_duration += duration
+        acc_distance += distance
+        if acc_distance >= split_m:
+            paces.append(acc_duration / (acc_distance / 1000))
+            acc_duration = 0.0
+            acc_distance = 0.0
+    if len(paces) < 2:
+        return _segment_paces(points)
     return paces
 
 
@@ -361,14 +509,12 @@ def _pace_hr_ratio(
 ) -> float | None:
     paces: list[float] = []
     hrs: list[float] = []
-    for previous, current in zip(points, points[1:]):
+    for previous, current, duration, distance in _valid_segments(points):
         midpoint = previous.elapsed_s + (current.elapsed_s - previous.elapsed_s) / 2
         if lower_elapsed_s is not None and midpoint < lower_elapsed_s:
             continue
         if upper_elapsed_s is not None and midpoint > upper_elapsed_s:
             continue
-        duration = current.elapsed_s - previous.elapsed_s
-        distance = _segment_distance(previous, current)
         if duration <= 0 or distance <= 0 or previous.heart_rate_bpm is None:
             continue
         paces.append(duration / (distance / 1000))
@@ -377,6 +523,135 @@ def _pace_hr_ratio(
         return None
     avg_hr = statistics.fmean(hrs)
     return statistics.fmean(paces) / avg_hr if avg_hr else None
+
+
+def _late_slowdown(points: list[TimeSeriesPoint]) -> float | None:
+    if len(points) < 3:
+        return None
+    midpoint = points[0].elapsed_s + (points[-1].elapsed_s - points[0].elapsed_s) / 2
+    first = _average_pace(points, upper_elapsed_s=midpoint)
+    second = _average_pace(points, lower_elapsed_s=midpoint)
+    if first is None or second is None or first == 0:
+        return None
+    return (second - first) / first * 100
+
+
+def _average_pace(
+    points: list[TimeSeriesPoint],
+    lower_elapsed_s: float | None = None,
+    upper_elapsed_s: float | None = None,
+) -> float | None:
+    duration_sum = 0.0
+    distance_sum = 0.0
+    for previous, current, duration, distance in _valid_segments(points):
+        midpoint = previous.elapsed_s + (current.elapsed_s - previous.elapsed_s) / 2
+        if lower_elapsed_s is not None and midpoint < lower_elapsed_s:
+            continue
+        if upper_elapsed_s is not None and midpoint > upper_elapsed_s:
+            continue
+        duration_sum += duration
+        distance_sum += distance
+    if duration_sum <= 0 or distance_sum <= 0:
+        return None
+    return duration_sum / (distance_sum / 1000)
+
+
+def _valid_segments(
+    points: list[TimeSeriesPoint],
+) -> list[tuple[TimeSeriesPoint, TimeSeriesPoint, float, float]]:
+    segments: list[tuple[TimeSeriesPoint, TimeSeriesPoint, float, float]] = []
+    for previous, current in zip(points, points[1:]):
+        duration = current.elapsed_s - previous.elapsed_s
+        distance = _segment_distance(previous, current)
+        if duration <= 0 or distance <= 0:
+            continue
+        if _is_pause_gap(duration, distance):
+            continue
+        segments.append((previous, current, duration, distance))
+    return segments
+
+
+def _is_pause_gap(duration: float, distance: float) -> bool:
+    return duration > PAUSE_GAP_SECONDS and distance <= PAUSE_GAP_MAX_DISTANCE_M
+
+
+def _has_obvious_pause(points: list[TimeSeriesPoint], duration_s: float | None) -> bool:
+    raw_elapsed = _duration_from_points(points)
+    if duration_s is not None and raw_elapsed is not None and raw_elapsed - duration_s > 60:
+        return True
+    for previous, current in zip(points, points[1:]):
+        duration = current.elapsed_s - previous.elapsed_s
+        distance = _segment_distance(previous, current)
+        if _is_pause_gap(duration, distance):
+            return True
+    return False
+
+
+def _analysis_confidence(
+    summary: dict[str, Any],
+    basic: BasicMetrics,
+    points: list[TimeSeriesPoint],
+    pace_stability: PaceStability,
+    training_type: str,
+) -> AnalysisConfidence:
+    reasons: list[str] = []
+    penalty = 0
+    if basic.average_hr is None and not any(p.heart_rate_bpm is not None for p in points):
+        reasons.append("FIT/summary 缺少心率，生理判断可信度下降")
+        penalty += 2
+    if not any(p.distance_m is not None for p in points):
+        reasons.append("FIT 缺少 distance/距离 records，配速和漂移判断可信度下降")
+        penalty += 2
+    if not any(p.speed_mps is not None for p in points):
+        reasons.append("FIT 缺少 speed/enhanced_speed 速度字段，配速稳定性可信度下降")
+        penalty += 1
+    if len(points) < 60 and (basic.duration_s or 0) >= 600:
+        reasons.append("FIT records 太少，无法稳定判断训练过程")
+        penalty += 2
+    if _has_obvious_pause(points, basic.duration_s):
+        reasons.append("FIT 中存在明显暂停或长时间 gap，已过滤暂停段")
+        penalty += 1
+    if _drift_not_applicable(summary, training_type, pace_stability):
+        reasons.append("间歇、比赛或明显变速课会降低全程趋势指标可信度")
+        penalty += 1
+
+    if penalty >= 3:
+        level = "low"
+    elif penalty >= 1:
+        level = "medium"
+    else:
+        level = "high"
+    return AnalysisConfidence(level=level, reasons=tuple(reasons))
+
+
+def _not_applicable_notes(
+    drift: HeartRateDrift,
+    confidence: AnalysisConfidence,
+) -> tuple[str, ...]:
+    notes: list[str] = []
+    if not drift.applicable and drift.reason:
+        notes.append(f"心率漂移：{drift.reason}")
+    for reason in confidence.reasons:
+        if "缺少" in reason or "太少" in reason:
+            notes.append(reason)
+    return tuple(notes)
+
+
+def _drift_not_applicable(
+    summary: dict[str, Any],
+    training_type: str,
+    pace_stability: PaceStability,
+) -> bool:
+    name = (summary.get("activityName") or "").lower()
+    if _name_has_any(name, ("interval", "间歇", "4×", "5×", "4x", "5x")):
+        return True
+    if training_type in {"比赛", "间歇课"}:
+        return True
+    return bool(pace_stability.cv_pct is not None and pace_stability.cv_pct > 25)
+
+
+def _name_has_any(name: str, keywords: tuple[str, ...]) -> bool:
+    return any(keyword in name for keyword in keywords)
 
 
 def _segment_distance(previous: TimeSeriesPoint, current: TimeSeriesPoint) -> float:
