@@ -410,6 +410,27 @@ def test_smooth_easy_run_does_not_get_workout_breakdown() -> None:
     assert analysis.workout_breakdown is None
 
 
+def test_slow_middle_with_higher_hr_is_not_treated_as_quality_workout() -> None:
+    summary = {
+        "activityId": "slow-middle-hr",
+        "activityName": "福州市 跑步",
+        "startTimeLocal": "2026-06-18T05:47:22",
+        "distance": 10100.0,
+        "duration": 3524.0,
+        "averageHR": 150,
+        "maxHR": 160,
+    }
+
+    analysis = analyze_activity(
+        summary,
+        _slow_middle_high_hr_points(),
+        _training_config_from_image(),
+    )
+
+    assert analysis.training_type == "中长有氧 / 稍稳有氧"
+    assert analysis.workout_breakdown is None
+
+
 def test_missing_fit_fields_lower_analysis_confidence() -> None:
     summary = {
         "activityId": "missing-fields",
@@ -579,6 +600,31 @@ def _structured_steady_points() -> list[TimeSeriesPoint]:
         # 2 km cooldown at 6:00/km
         (3240, 11000, 136, 2.78),
         (3960, 13000, 136, 2.78),
+    ]
+    start = datetime(2026, 6, 1, 6, 30, 0)
+    return [
+        TimeSeriesPoint(
+            timestamp=start + timedelta(seconds=offset_s),
+            elapsed_s=float(offset_s),
+            distance_m=distance_m,
+            heart_rate_bpm=heart_rate,
+            speed_mps=speed_mps,
+            cadence_spm=None,
+            altitude_m=None,
+        )
+        for offset_s, distance_m, heart_rate, speed_mps in rows
+    ]
+
+
+def _slow_middle_high_hr_points() -> list[TimeSeriesPoint]:
+    rows = [
+        # Ends are slightly faster; middle is slower but has higher HR.
+        (0, 0, 130, 2.94),
+        (680, 2000, 160, 2.94),
+        (1745, 5000, 160, 2.82),
+        (2810, 8000, 135, 2.82),
+        (2844, 8100, 135, 2.94),
+        (3524, 10100, 135, 2.94),
     ]
     start = datetime(2026, 6, 1, 6, 30, 0)
     return [

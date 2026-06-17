@@ -599,6 +599,8 @@ def _workout_breakdown(
         return None
 
     main_phase = _phase(_main_phase_name(training_type, main, zones), main)
+    if _non_quality_slowdown(training_type, chunks, main_phase):
+        return None
     if not _structured_breakdown_allowed(training_type, main_phase, zones):
         return None
     return WorkoutBreakdown(
@@ -651,6 +653,21 @@ def _structured_breakdown_allowed(
     if training_type in {"恢复跑", "MAF 跑", "E 跑"}:
         return main_hr > zones.aerobic_high
     return main_hr > zones.easy_high
+
+
+def _non_quality_slowdown(
+    training_type: str,
+    chunks: list[_Chunk],
+    main_phase: WorkoutPhase,
+) -> bool:
+    if training_type in {"阈值间歇", "阈值课", "间歇课", "比赛"}:
+        return False
+    total_distance = sum(chunk.distance_m for chunk in chunks) / 1000
+    total_duration = sum(chunk.duration_s for chunk in chunks)
+    average_pace = total_duration / total_distance if total_distance else None
+    if average_pace is None or main_phase.average_pace_s_per_km is None:
+        return False
+    return main_phase.average_pace_s_per_km > average_pace + 5
 
 
 def _main_phase_name(
