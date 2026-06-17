@@ -8,6 +8,7 @@ __pycache__/
 
 # Local Garmin credentials, tokens, raw health data, and databases.
 config/athlete.yaml
+config/running_background.md
 data/
 reports/
 *.sqlite

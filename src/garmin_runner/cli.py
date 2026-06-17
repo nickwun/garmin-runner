@@ -12,6 +12,15 @@ from typing import Annotated
 from dotenv import load_dotenv
 import typer
 
+from garmin_runner.coach import (
+    CoachRequest,
+    CodexCoachClient,
+    load_athlete_background,
+    require_coach_api_key,
+    run_coach,
+    to_jsonable,
+    training_context_from_settings,
+)
 from garmin_runner.analysis.single_activity import (
     analyze_activity,
     training_config_from_settings,
@@ -38,7 +47,9 @@ from garmin_runner.sync import sync_running_activities
 
 app = typer.Typer(help="Local-first Garmin running data sync and analysis toolkit.")
 report_app = typer.Typer(help="Generate deterministic training reports.")
+coach_app = typer.Typer(help="Generate optional Codex coaching summaries.")
 app.add_typer(report_app, name="report")
+app.add_typer(coach_app, name="coach")
 
 
 @app.callback()
@@ -224,6 +235,110 @@ def monthly_report(
         raise typer.Exit(code=1) from exc
 
     typer.echo(f"月报已生成：{report_path}")
+
+
+@coach_app.command("daily")
+def coach_daily(
+    activity_id: Annotated[str, typer.Argument(help="要总结的 Garmin activity_id。")],
+    config: Annotated[
+        Path,
+        typer.Option("--config", help="本地配置文件路径。"),
+    ] = Path("config/athlete.yaml"),
+) -> None:
+    """Use Codex to coach one analyzed activity from structured JSON."""
+    try:
+        settings = load_settings(config)
+        require_coach_api_key()
+        analysis = _daily_analysis(activity_id, settings)
+        request = CoachRequest(
+            scope="daily",
+            title=f"{analysis.basic.activity_date.isoformat()}_{activity_id}",
+            structured_data={"daily": to_jsonable(analysis)},
+            athlete_background=load_athlete_background(config),
+            training_context=training_context_from_settings(settings),
+        )
+        result = run_coach(
+            request,
+            reports_dir=settings.storage.reports_dir,
+            client=CodexCoachClient(cwd=Path.cwd()),
+        )
+    except Exception as exc:
+        typer.secho(f"教练总结失败：{exc}", fg=typer.colors.RED)
+        raise typer.Exit(code=1) from exc
+    typer.echo(f"教练总结已生成：{result.output_path}")
+    typer.echo(f"Prompt 已保存：{result.prompt_path}")
+
+
+@coach_app.command("weekly")
+def coach_weekly(
+    week: Annotated[
+        str | None,
+        typer.Option("--week", help="ISO 周，例如 current 或 2026-W25。"),
+    ] = "current",
+    config: Annotated[
+        Path,
+        typer.Option("--config", help="本地配置文件路径。"),
+    ] = Path("config/athlete.yaml"),
+) -> None:
+    """Use Codex to coach one weekly report from structured JSON."""
+    try:
+        settings = load_settings(config)
+        require_coach_api_key()
+        week_start, week_end = _weekly_range(week=week, since=None, until=None)
+        analysis = _weekly_analysis(week_start, week_end, settings)
+        request = CoachRequest(
+            scope="weekly",
+            title=f"{analysis.iso_year}-W{analysis.iso_week:02d}",
+            structured_data={"weekly": to_jsonable(analysis)},
+            athlete_background=load_athlete_background(config),
+            training_context=training_context_from_settings(settings),
+        )
+        result = run_coach(
+            request,
+            reports_dir=settings.storage.reports_dir,
+            client=CodexCoachClient(cwd=Path.cwd()),
+        )
+    except Exception as exc:
+        typer.secho(f"教练总结失败：{exc}", fg=typer.colors.RED)
+        raise typer.Exit(code=1) from exc
+    typer.echo(f"教练总结已生成：{result.output_path}")
+    typer.echo(f"Prompt 已保存：{result.prompt_path}")
+
+
+@coach_app.command("monthly")
+def coach_monthly(
+    month: Annotated[
+        str,
+        typer.Option("--month", help="月份，例如 current 或 2026-06。"),
+    ] = "current",
+    config: Annotated[
+        Path,
+        typer.Option("--config", help="本地配置文件路径。"),
+    ] = Path("config/athlete.yaml"),
+) -> None:
+    """Use Codex to coach one monthly report from structured JSON."""
+    try:
+        settings = load_settings(config)
+        require_coach_api_key()
+        month_start, month_end = month_bounds(month)
+        analysis = _monthly_analysis(month_start, month_end, settings)
+        request = CoachRequest(
+            scope="monthly",
+            title=f"{analysis.year}-{analysis.month:02d}",
+            structured_data={"monthly": to_jsonable(analysis)},
+            athlete_background=load_athlete_background(config),
+            training_context=training_context_from_settings(settings),
+        )
+        result = run_coach(
+            request,
+            reports_dir=settings.storage.reports_dir,
+            client=CodexCoachClient(cwd=Path.cwd()),
+        )
+    except Exception as exc:
+        typer.secho(f"教练总结失败：{exc}", fg=typer.colors.RED)
+        raise typer.Exit(code=1) from exc
+    typer.echo(f"教练总结已生成：{result.output_path}")
+    typer.echo(f"Prompt 已保存：{result.prompt_path}")
 
 
 @app.command()
@@ -480,6 +595,80 @@ def _weekly_range(
     except (ValueError, TypeError) as exc:
         raise ValueError("--week 必须是 current 或 YYYY-Www，例如 2026-W25。") from exc
     return start, start + timedelta(days=6)
+
+
+def _daily_analysis(activity_id: str, settings: object) -> object:
+    training_config = training_config_from_settings(settings)
+    store = ActivityStore(settings.storage.database_path)
+    store.initialize()
+    activity = store.get_activity(activity_id)
+    if activity is None:
+        raise ValueError(f"SQLite 中找不到 activity_id={activity_id}，请先运行 sync。")
+
+    summary_path = _resolve_local_path(activity["summary_path"])
+    fit_path = _resolve_local_path(activity["fit_path"])
+    if not summary_path.exists():
+        raise FileNotFoundError(f"找不到 summary JSON：{summary_path}")
+    if not fit_path.exists():
+        raise FileNotFoundError(f"找不到 FIT 文件：{fit_path}")
+
+    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    messages, errors = decode_fit_messages(fit_path)
+    if errors:
+        raise ValueError(f"FIT 解析失败，activity_id={activity_id}")
+    points = extract_time_series(messages)
+    return analyze_activity(summary, points, training_config)
+
+
+def _weekly_analysis(week_start: date, week_end: date, settings: object) -> object:
+    store = ActivityStore(settings.storage.database_path)
+    if not settings.storage.database_path.exists():
+        raise ValueError("SQLite 数据库不存在，请先运行 sync。")
+    training_config = training_config_from_settings(settings)
+    activities = [
+        _weekly_activity_from_row(row, settings.storage.reports_dir, training_config)
+        for row in store.list_activities_between(week_start.isoformat(), week_end.isoformat())
+    ]
+    previous_start = week_start - timedelta(days=7)
+    previous_end = week_start - timedelta(days=1)
+    previous_distance = store.sum_distance_between(
+        previous_start.isoformat(), previous_end.isoformat()
+    )
+    four_week_start = week_start - timedelta(days=28)
+    four_week_end = week_start - timedelta(days=1)
+    recent_4w_distance = store.sum_distance_between(
+        four_week_start.isoformat(), four_week_end.isoformat()
+    )
+    recent_4w_avg = recent_4w_distance / 4 if recent_4w_distance else None
+    return analyze_week(
+        WeeklyContext(
+            week_start=week_start,
+            week_end=week_end,
+            activities=activities,
+            previous_week_distance_km=previous_distance,
+            recent_4w_avg_distance_km=recent_4w_avg,
+            structure=_weekly_structure_from_settings(settings),
+        )
+    )
+
+
+def _monthly_analysis(month_start: date, month_end: date, settings: object) -> object:
+    store = ActivityStore(settings.storage.database_path)
+    if not settings.storage.database_path.exists():
+        raise ValueError("SQLite 数据库不存在，请先运行 sync。")
+    training_config = training_config_from_settings(settings)
+    activities = [
+        _weekly_activity_from_row(row, settings.storage.reports_dir, training_config)
+        for row in store.list_activities_between(month_start.isoformat(), month_end.isoformat())
+    ]
+    return analyze_month(
+        MonthlyContext(
+            month_start=month_start,
+            month_end=month_end,
+            activities=activities,
+            structure=_weekly_structure_from_settings(settings),
+        )
+    )
 
 
 def _weekly_structure_from_settings(settings: object) -> WeeklyTrainingStructure:

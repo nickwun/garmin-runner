@@ -194,6 +194,33 @@ reports/monthly/YYYY-MM.md
 
 月报仍使用确定性规则，不调用 LLM；阈值/间歇和结构化稳态优先按主训练段统计。
 
+## 生成 Codex 教练总结
+
+教练层是可选的 LLM 总结层。它不会读取原始 FIT、SQLite 明细或重新计算训练指标，只读取 daily/weekly/monthly 分析模块已经生成的结构化 JSON，再把这些确定性结果改写成更像教练的中文建议。
+
+```bash
+garmin-runner coach daily ACTIVITY_ID
+garmin-runner coach weekly --week current
+garmin-runner coach monthly --month current
+```
+
+输出路径：
+
+```text
+reports/coach/<daily|weekly|monthly>/*_prompt.md
+reports/coach/<daily|weekly|monthly>/*_data.json
+reports/coach/<daily|weekly|monthly>/*_output.md
+```
+
+启用前需要在本地 `.env` 设置：
+
+```bash
+GARMIN_RUNNER_COACH_API_KEY=your-local-secret
+GARMIN_RUNNER_BACKGROUND_PATH=/Users/hui/Downloads/跑步背景信息.md
+```
+
+`GARMIN_RUNNER_COACH_API_KEY` 只作为本地私有启用开关，不要提交到 Git。当前 provider 使用本机 Codex CLI；如果缺少 key，命令会给出中文提示并退出。个人跑步背景可以放在 `GARMIN_RUNNER_BACKGROUND_PATH` 指向的文件，或本地 `config/running_background.md`，后者已被 `.gitignore` 忽略。
+
 ## 真实数据验收
 
 检查本地环境、配置、目录、SQLite 和 Garmin 登录状态：
