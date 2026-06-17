@@ -28,10 +28,16 @@ class StorageSettings:
 
 @dataclass(frozen=True)
 class TrainingSettings:
-    maf_low: int | None = None
-    maf_high: int | None = None
-    steady_high: int | None = None
-    threshold_high: int | None = None
+    recovery_low: int = 120
+    recovery_high: int = 135
+    easy_low: int = 133
+    easy_high: int = 145
+    aerobic_high: int = 155
+    steady_high: int = 165
+    mp_bridge_high: int = 170
+    threshold_high: int = 178
+    vo2_high: int = 188
+    sprint_high: int = 194
     long_run_min_distance_km: float = 18.0
     long_run_min_duration_min: float = 90.0
 
@@ -61,6 +67,17 @@ def load_settings(config_path: Path = Path("config/athlete.yaml")) -> AppSetting
     storage_data = data.get("storage", {})
     training_data = data.get("training", {})
     hr_zones_data = training_data.get("heart_rate_zones", {})
+    new_zone_keys = {
+        "recovery_low",
+        "recovery_high",
+        "easy_low",
+        "easy_high",
+        "aerobic_high",
+        "mp_bridge_high",
+        "vo2_high",
+        "sprint_high",
+    }
+    uses_new_zone_schema = any(key in hr_zones_data for key in new_zone_keys)
 
     return AppSettings(
         garmin=GarminSettings(
@@ -83,10 +100,28 @@ def load_settings(config_path: Path = Path("config/athlete.yaml")) -> AppSetting
             reports_dir=_path(storage_data.get("reports_dir", "reports")),
         ),
         training=TrainingSettings(
-            maf_low=_optional_int(hr_zones_data.get("maf_low")),
-            maf_high=_optional_int(hr_zones_data.get("maf_high")),
-            steady_high=_optional_int(hr_zones_data.get("steady_high")),
-            threshold_high=_optional_int(hr_zones_data.get("threshold_high")),
+            recovery_low=_int_with_default(
+                hr_zones_data.get("recovery_low", hr_zones_data.get("maf_low")),
+                120,
+            ),
+            recovery_high=_int_with_default(hr_zones_data.get("recovery_high"), 135),
+            easy_low=_int_with_default(hr_zones_data.get("easy_low"), 133),
+            easy_high=_int_with_default(
+                hr_zones_data.get("easy_high", hr_zones_data.get("maf_high")),
+                145,
+            ),
+            aerobic_high=_int_with_default(
+                hr_zones_data.get("aerobic_high", hr_zones_data.get("steady_high")),
+                155,
+            ),
+            steady_high=_int_with_default(
+                hr_zones_data.get("steady_high") if uses_new_zone_schema else None,
+                165,
+            ),
+            mp_bridge_high=_int_with_default(hr_zones_data.get("mp_bridge_high"), 170),
+            threshold_high=_int_with_default(hr_zones_data.get("threshold_high"), 178),
+            vo2_high=_int_with_default(hr_zones_data.get("vo2_high"), 188),
+            sprint_high=_int_with_default(hr_zones_data.get("sprint_high"), 194),
             long_run_min_distance_km=float(
                 training_data.get("long_run_min_distance_km", 18.0)
             ),
@@ -101,9 +136,9 @@ def get_credentials(settings: GarminSettings) -> tuple[str | None, str | None]:
     return os.getenv(settings.email_env), os.getenv(settings.password_env)
 
 
-def _optional_int(value: Any) -> int | None:
+def _int_with_default(value: Any, default: int) -> int:
     if value is None:
-        return None
+        return default
     return int(value)
 
 

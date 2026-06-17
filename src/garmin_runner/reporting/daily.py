@@ -6,11 +6,15 @@ from garmin_runner.analysis.single_activity import SingleActivityAnalysis
 
 
 ZONE_LABELS = {
-    "below_maf": "低于 MAF",
-    "maf": "MAF 区间",
-    "steady": "稳态区间",
-    "threshold": "阈值区间",
-    "above_threshold": "阈值以上",
+    "below_range": "低于训练区间",
+    "very_easy": "恢复跑 / Very Easy",
+    "easy": "轻松跑 / E 跑",
+    "aerobic": "中长有氧 / 稍稳有氧",
+    "steady": "稳态跑 / Steady",
+    "mp_bridge": "马配桥梁 / MP Bridge",
+    "threshold": "阈值跑 / Tempo / T",
+    "vo2": "10km / 5km 强度",
+    "sprint": "冲刺 / 极限末段",
 }
 
 

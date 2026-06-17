@@ -8,10 +8,17 @@ from typing import Any
 
 @dataclass(frozen=True)
 class HeartRateZones:
-    maf_low: int
-    maf_high: int
-    steady_high: int
-    threshold_high: int
+    maf_low: int = 120
+    maf_high: int = 145
+    steady_high: int = 165
+    threshold_high: int = 178
+    recovery_high: int = 135
+    easy_low: int = 133
+    easy_high: int = 145
+    aerobic_high: int = 155
+    mp_bridge_high: int = 170
+    vo2_high: int = 188
+    sprint_high: int = 194
 
 
 @dataclass(frozen=True)
@@ -78,23 +85,19 @@ class SingleActivityAnalysis:
 
 def training_config_from_settings(settings: Any) -> TrainingConfig:
     training = settings.training
-    missing = [
-        name
-        for name in ("maf_low", "maf_high", "steady_high", "threshold_high")
-        if getattr(training, name) is None
-    ]
-    if missing:
-        raise ValueError(
-            "缺少个人训练区间配置："
-            + ", ".join(missing)
-            + "。请在 config/athlete.yaml 的 training.heart_rate_zones 中填写。"
-        )
     return TrainingConfig(
         heart_rate_zones=HeartRateZones(
-            maf_low=training.maf_low,
-            maf_high=training.maf_high,
+            maf_low=training.recovery_low,
+            maf_high=training.easy_high,
             steady_high=training.steady_high,
             threshold_high=training.threshold_high,
+            recovery_high=training.recovery_high,
+            easy_low=training.easy_low,
+            easy_high=training.easy_high,
+            aerobic_high=training.aerobic_high,
+            mp_bridge_high=training.mp_bridge_high,
+            vo2_high=training.vo2_high,
+            sprint_high=training.sprint_high,
         ),
         long_run_min_distance_km=training.long_run_min_distance_km,
         long_run_min_duration_s=training.long_run_min_duration_min * 60,
@@ -161,11 +164,15 @@ def _hr_zone_summary(
     points: list[TimeSeriesPoint], zones: HeartRateZones
 ) -> HeartRateZoneSummary:
     seconds = {
-        "below_maf": 0.0,
-        "maf": 0.0,
+        "below_range": 0.0,
+        "very_easy": 0.0,
+        "easy": 0.0,
+        "aerobic": 0.0,
         "steady": 0.0,
+        "mp_bridge": 0.0,
         "threshold": 0.0,
-        "above_threshold": 0.0,
+        "vo2": 0.0,
+        "sprint": 0.0,
     }
     for previous, current in zip(points, points[1:]):
         if previous.heart_rate_bpm is None:
@@ -177,14 +184,22 @@ def _hr_zone_summary(
 
 def _zone_name(heart_rate: float, zones: HeartRateZones) -> str:
     if heart_rate < zones.maf_low:
-        return "below_maf"
-    if heart_rate <= zones.maf_high:
-        return "maf"
+        return "below_range"
+    if heart_rate < zones.easy_low:
+        return "very_easy"
+    if heart_rate <= zones.easy_high:
+        return "easy"
+    if heart_rate <= zones.aerobic_high:
+        return "aerobic"
     if heart_rate <= zones.steady_high:
         return "steady"
+    if heart_rate <= zones.mp_bridge_high:
+        return "mp_bridge"
     if heart_rate <= zones.threshold_high:
         return "threshold"
-    return "above_threshold"
+    if heart_rate <= zones.vo2_high:
+        return "vo2"
+    return "sprint"
 
 
 def _pace_stability(points: list[TimeSeriesPoint]) -> PaceStability:
@@ -234,28 +249,45 @@ def _classify_training(
     duration = basic.duration_s or 0
     total_zone_time = sum(hr_zones.seconds_by_zone.values()) or duration or 1
     pct = {key: value / total_zone_time for key, value in hr_zones.seconds_by_zone.items()}
-    hard_pct = pct["threshold"] + pct["above_threshold"]
+    hard_pct = pct["threshold"] + pct["vo2"] + pct["sprint"]
+    avg_hr = basic.average_hr
 
     if any(keyword in name for keyword in ("race", "比赛", "半马", "马拉松", "10k", "5k")):
         return "比赛"
-    if distance >= config.long_run_min_distance_km or duration >= config.long_run_min_duration_s:
-        return "长距离"
     if (
-        (pct["above_threshold"] >= 0.20 and (pace_stability.cv_pct or 0) > 10)
+        (pct["vo2"] + pct["sprint"] >= 0.20 and (pace_stability.cv_pct or 0) > 10)
         or "interval" in name
         or "间歇" in name
     ):
         return "间歇课"
+    if any(keyword in name for keyword in ("4×2", "5×2", "4x2", "5x2", "tempo", "threshold", "阈值")):
+        return "阈值课"
+    reaches_long_run_threshold = (
+        distance >= config.long_run_min_distance_km
+        and duration >= config.long_run_min_duration_s
+    )
+    if distance >= 20 or reaches_long_run_threshold:
+        return "长距离"
     if hard_pct >= 0.30:
         return "阈值课"
+    if avg_hr is not None:
+        if avg_hr < config.heart_rate_zones.easy_low:
+            return "恢复跑" if distance <= 8 and duration <= 45 * 60 else "E 跑"
+        if avg_hr <= config.heart_rate_zones.easy_high:
+            return "E 跑"
+        if avg_hr <= config.heart_rate_zones.aerobic_high:
+            return "中长有氧 / 稍稳有氧"
+        if avg_hr <= config.heart_rate_zones.steady_high:
+            return "稳态跑"
+        if avg_hr <= config.heart_rate_zones.mp_bridge_high:
+            return "马配桥梁"
+        if avg_hr <= config.heart_rate_zones.threshold_high:
+            return "阈值课"
+        return "间歇课"
     if pct["steady"] >= 0.35:
         return "稳态跑"
-    if pct["maf"] >= 0.50:
-        return "MAF 跑"
-    if pct["below_maf"] + pct["maf"] >= 0.80:
+    if pct["easy"] >= 0.50:
         return "E 跑"
-    if pct["below_maf"] >= 0.50 or (basic.average_hr and basic.average_hr < config.heart_rate_zones.maf_low):
-        return "恢复跑"
     return "E 跑"
 
 
@@ -273,10 +305,10 @@ def _score_execution(
 
     total = sum(hr_zones.seconds_by_zone.values()) or 1
     pct = {key: value / total for key, value in hr_zones.seconds_by_zone.items()}
-    if training_type in {"恢复跑", "MAF 跑", "E 跑"}:
-        score -= (pct["threshold"] + pct["above_threshold"]) * 35
-    if training_type in {"阈值课", "间歇课"} and pct["below_maf"] > 0.30:
-        score -= (pct["below_maf"] - 0.30) * 20
+    if training_type in {"恢复跑", "E 跑", "普通中长距离有氧"}:
+        score -= (pct["threshold"] + pct["vo2"] + pct["sprint"]) * 35
+    if training_type in {"阈值课", "间歇课"} and pct.get("below_range", 0) > 0.30:
+        score -= (pct.get("below_range", 0) - 0.30) * 20
     return max(0, min(100, round(score)))
 
 
@@ -287,8 +319,12 @@ def _coach_instruction(
     drift: HeartRateDrift,
 ) -> str:
     notes: list[str] = []
-    if training_type in {"恢复跑", "MAF 跑", "E 跑"}:
+    if training_type in {"恢复跑", "E 跑"}:
         notes.append("下一次同类训练继续把强度压在目标有氧区间，宁可慢一点，也不要后程追配速。")
+    elif training_type == "普通中长距离有氧":
+        notes.append("下一次同类训练保持有氧可控，重点看后半程心率和步频是否稳定。")
+    elif training_type in {"中长有氧 / 稍稳有氧", "稳态跑", "马配桥梁"}:
+        notes.append("下一次同类训练保持节奏感，但不要把有氧训练跑成阈值课。")
     elif training_type in {"阈值课", "间歇课"}:
         notes.append("下一次质量课先保证热身充分，主训练段保持可控，不用把最后一组跑成冲刺。")
     elif training_type == "长距离":

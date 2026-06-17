@@ -39,8 +39,15 @@ def test_analyze_activity_calculates_basic_metrics_zones_and_drift() -> None:
         heart_rate_zones=HeartRateZones(
             maf_low=120,
             maf_high=145,
-            steady_high=155,
-            threshold_high=170,
+            recovery_high=135,
+            easy_low=133,
+            easy_high=145,
+            aerobic_high=155,
+            steady_high=165,
+            mp_bridge_high=170,
+            threshold_high=178,
+            vo2_high=188,
+            sprint_high=194,
         )
     )
 
@@ -54,11 +61,15 @@ def test_analyze_activity_calculates_basic_metrics_zones_and_drift() -> None:
     assert analysis.basic.elevation_gain_m == 38
     assert analysis.basic.average_cadence_spm == 176
     assert analysis.hr_zones.seconds_by_zone == {
-        "below_maf": 60.0,
-        "maf": 120.0,
+        "below_range": 60.0,
+        "very_easy": 60.0,
+        "easy": 60.0,
+        "aerobic": 60.0,
         "steady": 60.0,
+        "mp_bridge": 0.0,
         "threshold": 60.0,
-        "above_threshold": 60.0,
+        "vo2": 0.0,
+        "sprint": 0.0,
     }
     assert analysis.pace_stability.cv_pct == 0.0
     assert analysis.heart_rate_drift.drift_pct > 0
@@ -91,8 +102,15 @@ def test_analyze_activity_classifies_threshold_workout_and_scores_execution() ->
         heart_rate_zones=HeartRateZones(
             maf_low=120,
             maf_high=145,
-            steady_high=155,
-            threshold_high=170,
+            recovery_high=135,
+            easy_low=133,
+            easy_high=145,
+            aerobic_high=155,
+            steady_high=165,
+            mp_bridge_high=170,
+            threshold_high=178,
+            vo2_high=188,
+            sprint_high=194,
         )
     )
 
@@ -121,8 +139,15 @@ def test_daily_report_uses_required_path_and_sections(tmp_path: Path) -> None:
             heart_rate_zones=HeartRateZones(
                 maf_low=120,
                 maf_high=145,
-                steady_high=155,
-                threshold_high=170,
+                recovery_high=135,
+                easy_low=133,
+                easy_high=145,
+                aerobic_high=155,
+                steady_high=165,
+                mp_bridge_high=170,
+                threshold_high=178,
+                vo2_high=188,
+                sprint_high=194,
             )
         ),
     )
@@ -135,6 +160,66 @@ def test_daily_report_uses_required_path_and_sections(tmp_path: Path) -> None:
     assert "## 生理面" in content
     assert "## 执行打分" in content
     assert "## 教练指令" in content
+
+
+def test_user_calibrated_easy_run_classification() -> None:
+    summary = {
+        "activityId": "601754283",
+        "activityName": "福州市 跑步",
+        "startTimeLocal": "2026-06-03T05:49:41",
+        "distance": 14377.21,
+        "duration": 4877.912,
+        "averageHR": 134,
+        "maxHR": 145,
+    }
+
+    analysis = analyze_activity(
+        summary,
+        _steady_points(distance_m=14377.21, duration_s=4877.912, heart_rate=134),
+        _training_config_from_image(),
+    )
+
+    assert analysis.training_type == "E 跑"
+
+
+def test_user_calibrated_medium_long_low_hr_classification() -> None:
+    summary = {
+        "activityId": "607025766",
+        "activityName": "福州市 跑步",
+        "startTimeLocal": "2026-06-17T05:47:22",
+        "distance": 15926.13,
+        "duration": 5599.562,
+        "averageHR": 132,
+        "maxHR": 157,
+    }
+
+    analysis = analyze_activity(
+        summary,
+        _steady_points(distance_m=15926.13, duration_s=5599.562, heart_rate=132),
+        _training_config_from_image(),
+    )
+
+    assert analysis.training_type == "E 跑"
+
+
+def test_long_run_uses_distance_and_duration_thresholds_together() -> None:
+    summary = {
+        "activityId": "longish",
+        "activityName": "福州市 跑步",
+        "startTimeLocal": "2026-06-18T05:47:22",
+        "distance": 18500.0,
+        "duration": 5700.0,
+        "averageHR": 139,
+        "maxHR": 150,
+    }
+
+    analysis = analyze_activity(
+        summary,
+        _steady_points(distance_m=18500.0, duration_s=5700.0, heart_rate=139),
+        _training_config_from_image(),
+    )
+
+    assert analysis.training_type == "长距离"
 
 
 def _points(rows: list[tuple[int, float, int, float]]) -> list[TimeSeriesPoint]:
@@ -151,3 +236,35 @@ def _points(rows: list[tuple[int, float, int, float]]) -> list[TimeSeriesPoint]:
         )
         for offset_s, distance_m, heart_rate, speed_mps in rows
     ]
+
+
+def _steady_points(
+    distance_m: float,
+    duration_s: float,
+    heart_rate: int,
+) -> list[TimeSeriesPoint]:
+    return _points(
+        [
+            (0, 0, heart_rate, distance_m / duration_s),
+            (int(duration_s / 2), distance_m / 2, heart_rate, distance_m / duration_s),
+            (int(duration_s), distance_m, heart_rate, distance_m / duration_s),
+        ]
+    )
+
+
+def _training_config_from_image() -> TrainingConfig:
+    return TrainingConfig(
+        heart_rate_zones=HeartRateZones(
+            maf_low=120,
+            maf_high=145,
+            recovery_high=135,
+            easy_low=133,
+            easy_high=145,
+            aerobic_high=155,
+            steady_high=165,
+            mp_bridge_high=170,
+            threshold_high=178,
+            vo2_high=188,
+            sprint_high=194,
+        )
+    )

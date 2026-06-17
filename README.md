@@ -40,10 +40,16 @@ cp config/athlete.example.yaml config/athlete.yaml
 ```yaml
 training:
   heart_rate_zones:
-    maf_low: 120
-    maf_high: 145
-    steady_high: 155
-    threshold_high: 170
+    recovery_low: 120
+    recovery_high: 135
+    easy_low: 133
+    easy_high: 145
+    aerobic_high: 155
+    steady_high: 165
+    mp_bridge_high: 170
+    threshold_high: 178
+    vo2_high: 188
+    sprint_high: 194
   long_run_min_distance_km: 18
   long_run_min_duration_min: 90
 ```
