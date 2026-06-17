@@ -114,10 +114,7 @@ def analyze_week(context: WeeklyContext) -> WeeklyAnalysis:
     high = _bucket(activities, HIGH_INTENSITY_TYPES)
     long_run = _bucket(activities, LONG_RUN_TYPES)
     grouped_types = EASY_TYPES | STEADY_TYPES | HIGH_INTENSITY_TYPES | LONG_RUN_TYPES
-    auxiliary = _bucket(
-        [item for item in activities if item.training_type not in grouped_types],
-        None,
-    )
+    auxiliary = _auxiliary_bucket(activities, grouped_types)
 
     high_count = sum(1 for item in activities if item.training_type in HIGH_INTENSITY_TYPES)
     high_ratio = high.duration_s / total_duration if total_duration else 0.0
@@ -190,7 +187,7 @@ def _bucket(
 
 def _bucket_distance(activity: WeeklyActivity) -> float:
     if (
-        activity.training_type in HIGH_INTENSITY_TYPES
+        activity.training_type in (HIGH_INTENSITY_TYPES | STEADY_TYPES)
         and activity.intensity_distance_km is not None
     ):
         return activity.intensity_distance_km
@@ -199,11 +196,29 @@ def _bucket_distance(activity: WeeklyActivity) -> float:
 
 def _bucket_duration(activity: WeeklyActivity) -> float:
     if (
-        activity.training_type in HIGH_INTENSITY_TYPES
+        activity.training_type in (HIGH_INTENSITY_TYPES | STEADY_TYPES)
         and activity.intensity_duration_s is not None
     ):
         return activity.intensity_duration_s
     return activity.duration_s
+
+
+def _auxiliary_bucket(
+    activities: list[WeeklyActivity],
+    grouped_types: set[str],
+) -> IntensityBucket:
+    distance = 0.0
+    duration = 0.0
+    for activity in activities:
+        if activity.training_type not in grouped_types:
+            distance += activity.distance_km
+            duration += activity.duration_s
+            continue
+        if activity.intensity_distance_km is not None:
+            distance += max(0.0, activity.distance_km - activity.intensity_distance_km)
+        if activity.intensity_duration_s is not None:
+            duration += max(0.0, activity.duration_s - activity.intensity_duration_s)
+    return IntensityBucket(distance_km=round(distance, 2), duration_s=duration)
 
 
 def _delta(current: float, baseline: float | None) -> tuple[float | None, float | None]:

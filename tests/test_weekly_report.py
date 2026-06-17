@@ -34,7 +34,15 @@ def test_weekly_report_calculates_volume_structure_and_risks(tmp_path: Path) -> 
                     intensity_distance_km=8,
                     intensity_duration_s=2400,
                 ),
-                _activity("steady", date(2026, 6, 19), 12, 3600, "稳态跑"),
+                _activity(
+                    "steady",
+                    date(2026, 6, 19),
+                    12,
+                    3600,
+                    "稳态跑",
+                    intensity_distance_km=8,
+                    intensity_duration_s=2400,
+                ),
                 _activity("long", date(2026, 6, 21), 28, 9000, "长距离"),
             ],
             previous_week_distance_km=64,
@@ -50,6 +58,10 @@ def test_weekly_report_calculates_volume_structure_and_risks(tmp_path: Path) -> 
     assert analysis.high_intensity_count == 1
     assert analysis.high_intensity.distance_km == 8
     assert analysis.high_intensity.duration_s == 2400
+    assert analysis.steady.distance_km == 8
+    assert analysis.steady.duration_s == 2400
+    assert analysis.auxiliary.distance_km == 12
+    assert analysis.auxiliary.duration_s == 3600
     assert analysis.high_intensity_time_ratio > 0
     assert analysis.conclusion in {"有效刺激", "稳定积累"}
     assert len(analysis.key_workouts) == 3

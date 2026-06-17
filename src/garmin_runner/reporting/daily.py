@@ -135,7 +135,8 @@ def _render_workout_breakdown(analysis: SingleActivityAnalysis) -> str:
         return ""
     phases = [breakdown.warmup, breakdown.main, breakdown.quality, breakdown.cooldown]
     lines = [
-        f"- {phase.name}：{phase.distance_km:.1f} km，{_format_duration(phase.duration_s)}，{_format_pace(phase.average_pace_s_per_km)}"
+        f"- {phase.name}：{phase.distance_km:.1f} km，{_format_duration(phase.duration_s)}，"
+        f"{_format_pace(phase.average_pace_s_per_km)}，均心 {_format_float(phase.average_hr_bpm, ' bpm')}"
         for phase in phases
     ]
     return "## 分段拆解\n\n" + "\n".join(lines)

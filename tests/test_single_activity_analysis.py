@@ -362,6 +362,54 @@ def test_daily_report_renders_interval_breakdown(tmp_path: Path) -> None:
     assert "冷身：3.0 km" in content
 
 
+def test_structured_steady_run_splits_warmup_main_and_cooldown() -> None:
+    summary = {
+        "activityId": "structured-steady",
+        "activityName": "福州市 稳态跑",
+        "startTimeLocal": "2026-06-18T05:47:22",
+        "distance": 13000.0,
+        "duration": 4260.0,
+        "averageHR": 150,
+        "maxHR": 166,
+    }
+
+    analysis = analyze_activity(
+        summary,
+        _structured_steady_points(),
+        _training_config_from_image(),
+    )
+
+    assert analysis.training_type == "稳态跑"
+    assert analysis.workout_breakdown is not None
+    assert analysis.workout_breakdown.warmup.distance_km == 3.0
+    assert analysis.workout_breakdown.main.name == "稳态训练段"
+    assert analysis.workout_breakdown.main.distance_km == 8.0
+    assert analysis.workout_breakdown.quality.name == "稳态主段"
+    assert analysis.workout_breakdown.quality.distance_km == 8.0
+    assert analysis.workout_breakdown.cooldown.distance_km == 2.0
+
+
+def test_smooth_easy_run_does_not_get_workout_breakdown() -> None:
+    summary = {
+        "activityId": "smooth-easy",
+        "activityName": "福州市 跑步",
+        "startTimeLocal": "2026-06-18T05:47:22",
+        "distance": 14000.0,
+        "duration": 5040.0,
+        "averageHR": 134,
+        "maxHR": 142,
+    }
+
+    analysis = analyze_activity(
+        summary,
+        _steady_points(distance_m=14000.0, duration_s=5040.0, heart_rate=134),
+        _training_config_from_image(),
+    )
+
+    assert analysis.training_type == "E 跑"
+    assert analysis.workout_breakdown is None
+
+
 def test_missing_fit_fields_lower_analysis_confidence() -> None:
     summary = {
         "activityId": "missing-fields",
@@ -503,6 +551,34 @@ def _interval_points() -> list[TimeSeriesPoint]:
         (3240, 11000, 174, 4.17),
         # 3 km cooldown
         (4320, 14000, 135, 2.78),
+    ]
+    start = datetime(2026, 6, 1, 6, 30, 0)
+    return [
+        TimeSeriesPoint(
+            timestamp=start + timedelta(seconds=offset_s),
+            elapsed_s=float(offset_s),
+            distance_m=distance_m,
+            heart_rate_bpm=heart_rate,
+            speed_mps=speed_mps,
+            cadence_spm=None,
+            altitude_m=None,
+        )
+        for offset_s, distance_m, heart_rate, speed_mps in rows
+    ]
+
+
+def _structured_steady_points() -> list[TimeSeriesPoint]:
+    rows = [
+        # 3 km warmup at 6:00/km
+        (0, 0, 128, 2.78),
+        (1080, 3000, 140, 2.78),
+        # 8 km steady block at 4:30/km
+        (1080, 3000, 156, 3.70),
+        (2160, 7000, 160, 3.70),
+        (3240, 11000, 162, 3.70),
+        # 2 km cooldown at 6:00/km
+        (3240, 11000, 136, 2.78),
+        (3960, 13000, 136, 2.78),
     ]
     start = datetime(2026, 6, 1, 6, 30, 0)
     return [

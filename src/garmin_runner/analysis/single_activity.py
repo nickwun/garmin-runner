@@ -98,6 +98,7 @@ class WorkoutPhase:
     distance_km: float
     duration_s: float
     average_pace_s_per_km: float | None
+    average_hr_bpm: float | None = None
 
 
 @dataclass(frozen=True)
@@ -153,7 +154,10 @@ def analyze_activity(
     hr_zones = _hr_zone_summary(points, config.heart_rate_zones)
     pace_stability = _pace_stability(points)
     training_type = _classify_training(summary, basic, hr_zones, pace_stability, config)
-    workout_breakdown = _workout_breakdown(points, training_type)
+    workout_breakdown = _workout_breakdown(points, training_type, config.heart_rate_zones)
+    training_type = _refine_training_type_with_breakdown(
+        training_type, workout_breakdown, config.heart_rate_zones
+    )
     drift = _heart_rate_drift(summary, points, training_type, pace_stability)
     confidence = _analysis_confidence(summary, basic, points, pace_stability, training_type)
     not_applicable_notes = _not_applicable_notes(drift, confidence)
@@ -536,41 +540,151 @@ class _Chunk:
     distance_m: float
     duration_s: float
     pace_s_per_km: float
+    average_hr_bpm: float | None
 
 
 def _workout_breakdown(
     points: list[TimeSeriesPoint],
     training_type: str,
+    zones: HeartRateZones,
 ) -> WorkoutBreakdown | None:
-    if training_type != "阈值间歇":
-        return None
     chunks = _distance_chunks(points)
     if len(chunks) < 3:
         return None
     paces = [chunk.pace_s_per_km for chunk in chunks]
-    if max(paces) - min(paces) < 20:
-        return None
-    fast_cutoff = min(paces) + (max(paces) - min(paces)) * 0.45
-    fast_indexes = [
-        index for index, chunk in enumerate(chunks) if chunk.pace_s_per_km <= fast_cutoff
+    pace_range = max(paces) - min(paces)
+    hr_values = [
+        chunk.average_hr_bpm for chunk in chunks if chunk.average_hr_bpm is not None
     ]
-    if not fast_indexes:
+    hr_range = max(hr_values) - min(hr_values) if len(hr_values) >= 2 else 0.0
+    pace_signal = pace_range >= 25
+    hr_signal = hr_range >= 14
+    if not pace_signal and not hr_signal:
         return None
 
-    first_fast = fast_indexes[0]
-    last_fast = fast_indexes[-1]
-    warmup = chunks[:first_fast]
-    main = chunks[first_fast : last_fast + 1]
-    cooldown = chunks[last_fast + 1 :]
-    quality = [chunks[index] for index in fast_indexes]
+    if pace_signal:
+        fast_cutoff = min(paces) + pace_range * 0.45
+        quality_indexes = [
+            index
+            for index, chunk in enumerate(chunks)
+            if chunk.pace_s_per_km <= fast_cutoff
+        ]
+    else:
+        hr_cutoff = min(hr_values) + hr_range * 0.45
+        quality_indexes = [
+            index
+            for index, chunk in enumerate(chunks)
+            if chunk.average_hr_bpm is not None and chunk.average_hr_bpm >= hr_cutoff
+        ]
+    if not quality_indexes:
+        return None
+
+    first_quality = quality_indexes[0]
+    last_quality = quality_indexes[-1]
+    warmup = chunks[:first_quality]
+    main = chunks[first_quality : last_quality + 1]
+    cooldown = chunks[last_quality + 1 :]
+    quality = [chunks[index] for index in quality_indexes]
     if not main:
+        return None
+    warmup_distance = sum(chunk.distance_m for chunk in warmup) / 1000
+    main_distance = sum(chunk.distance_m for chunk in main) / 1000
+    cooldown_distance = sum(chunk.distance_m for chunk in cooldown) / 1000
+    total_distance = sum(chunk.distance_m for chunk in chunks) / 1000
+    if main_distance < 2 or main_distance / total_distance < 0.25:
+        return None
+    if training_type != "阈值间歇" and (
+        warmup_distance < 0.8 or cooldown_distance < 0.8
+    ):
+        return None
+
+    main_phase = _phase(_main_phase_name(training_type, main, zones), main)
+    if not _structured_breakdown_allowed(training_type, main_phase, zones):
         return None
     return WorkoutBreakdown(
         warmup=_phase("热身", warmup),
-        main=_phase("阈值间歇训练段", main),
+        main=main_phase,
         cooldown=_phase("冷身", cooldown),
-        quality=_phase("阈值快段", quality),
+        quality=_phase(_quality_phase_name(training_type, main_phase), quality),
     )
+
+
+def _refine_training_type_with_breakdown(
+    training_type: str,
+    workout_breakdown: WorkoutBreakdown | None,
+    zones: HeartRateZones,
+) -> str:
+    if workout_breakdown is None:
+        return training_type
+    main_hr = workout_breakdown.main.average_hr_bpm
+    if main_hr is None or training_type in {
+        "阈值间歇",
+        "阈值课",
+        "间歇课",
+        "比赛",
+        "长距离",
+    }:
+        return training_type
+    if main_hr > zones.mp_bridge_high:
+        return "阈值课"
+    if main_hr > zones.steady_high:
+        return "马配桥梁"
+    if main_hr > zones.aerobic_high:
+        return "稳态跑"
+    if main_hr > zones.easy_high:
+        return "中长有氧 / 稍稳有氧"
+    return training_type
+
+
+def _structured_breakdown_allowed(
+    training_type: str,
+    main_phase: WorkoutPhase,
+    zones: HeartRateZones,
+) -> bool:
+    if training_type in {"比赛", "长距离", "热身/冷身"}:
+        return False
+    if training_type in {"阈值间歇", "阈值课", "间歇课", "轻松跑跑成质量课"}:
+        return True
+    main_hr = main_phase.average_hr_bpm
+    if main_hr is None:
+        return training_type in {"稳态跑", "马配桥梁"}
+    if training_type in {"恢复跑", "MAF 跑", "E 跑"}:
+        return main_hr > zones.aerobic_high
+    return main_hr > zones.easy_high
+
+
+def _main_phase_name(
+    training_type: str,
+    chunks: list[_Chunk],
+    zones: HeartRateZones,
+) -> str:
+    phase = _phase("主训练段", chunks)
+    main_hr = phase.average_hr_bpm
+    if training_type == "阈值间歇":
+        return "阈值间歇训练段"
+    if training_type in {"阈值课", "间歇课", "轻松跑跑成质量课"}:
+        return "强度主训练段"
+    if training_type == "马配桥梁" or (
+        main_hr is not None and main_hr > zones.steady_high
+    ):
+        return "马配桥梁主训练段"
+    if training_type == "稳态跑" or (
+        main_hr is not None and main_hr > zones.aerobic_high
+    ):
+        return "稳态训练段"
+    return "有氧主训练段"
+
+
+def _quality_phase_name(training_type: str, main_phase: WorkoutPhase) -> str:
+    if training_type == "阈值间歇":
+        return "阈值快段"
+    if "稳态" in main_phase.name:
+        return "稳态主段"
+    if "马配" in main_phase.name:
+        return "马配主段"
+    if "强度" in main_phase.name:
+        return "强度快段"
+    return "有氧主段"
 
 
 def _distance_chunks(
@@ -580,6 +694,8 @@ def _distance_chunks(
     chunks: list[_Chunk] = []
     acc_distance = 0.0
     acc_duration = 0.0
+    acc_hr_weighted = 0.0
+    acc_hr_duration = 0.0
     start_m: float | None = None
     end_m = 0.0
     for previous, current, duration, distance in _valid_segments(points):
@@ -587,6 +703,9 @@ def _distance_chunks(
             start_m = previous.distance_m or end_m
         acc_distance += distance
         acc_duration += duration
+        if previous.heart_rate_bpm is not None:
+            acc_hr_weighted += previous.heart_rate_bpm * duration
+            acc_hr_duration += duration
         end_m = current.distance_m if current.distance_m is not None else end_m + distance
         if acc_distance >= chunk_m:
             chunks.append(
@@ -596,11 +715,18 @@ def _distance_chunks(
                     distance_m=acc_distance,
                     duration_s=acc_duration,
                     pace_s_per_km=acc_duration / (acc_distance / 1000),
+                    average_hr_bpm=(
+                        acc_hr_weighted / acc_hr_duration
+                        if acc_hr_duration
+                        else None
+                    ),
                 )
             )
             start_m = end_m
             acc_distance = 0.0
             acc_duration = 0.0
+            acc_hr_weighted = 0.0
+            acc_hr_duration = 0.0
     if acc_distance > 0 and acc_duration > 0 and start_m is not None:
         chunks.append(
             _Chunk(
@@ -609,6 +735,9 @@ def _distance_chunks(
                 distance_m=acc_distance,
                 duration_s=acc_duration,
                 pace_s_per_km=acc_duration / (acc_distance / 1000),
+                average_hr_bpm=(
+                    acc_hr_weighted / acc_hr_duration if acc_hr_duration else None
+                ),
             )
         )
     return chunks
@@ -618,11 +747,25 @@ def _phase(name: str, chunks: list[_Chunk]) -> WorkoutPhase:
     distance = sum(chunk.distance_m for chunk in chunks) / 1000
     duration = sum(chunk.duration_s for chunk in chunks)
     pace = duration / distance if duration and distance else None
+    hr_duration = sum(
+        chunk.duration_s for chunk in chunks if chunk.average_hr_bpm is not None
+    )
+    average_hr = (
+        sum(
+            (chunk.average_hr_bpm or 0) * chunk.duration_s
+            for chunk in chunks
+            if chunk.average_hr_bpm is not None
+        )
+        / hr_duration
+        if hr_duration
+        else None
+    )
     return WorkoutPhase(
         name=name,
         distance_km=round(distance, 2),
         duration_s=duration,
         average_pace_s_per_km=pace,
+        average_hr_bpm=average_hr,
     )
 
 
