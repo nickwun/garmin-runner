@@ -48,6 +48,13 @@ training:
   long_run_min_duration_min: 90
 ```
 
+如果你的 Garmin Connect 是中国区账号（`https://connect.garmin.cn/`），请确认：
+
+```yaml
+garmin:
+  is_cn: true
+```
+
 ## 设置凭证
 
 推荐使用交互式命令创建本地 `.env`：

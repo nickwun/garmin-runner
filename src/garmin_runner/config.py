@@ -14,6 +14,7 @@ class GarminSettings:
     email_env: str = "GARMIN_EMAIL"
     password_env: str = "GARMIN_PASSWORD"
     token_store: Path = Path("data/tokens")
+    is_cn: bool = False
 
 
 @dataclass(frozen=True)
@@ -69,6 +70,7 @@ def load_settings(config_path: Path = Path("config/athlete.yaml")) -> AppSetting
                 os.getenv("GARMIN_TOKEN_STORE")
                 or garmin_data.get("token_store", "data/tokens")
             ),
+            is_cn=_bool(garmin_data.get("is_cn", False)),
         ),
         storage=StorageSettings(
             data_dir=_path(storage_data.get("data_dir", "data")),
@@ -103,3 +105,11 @@ def _optional_int(value: Any) -> int | None:
     if value is None:
         return None
     return int(value)
+
+
+def _bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "y", "on"}
+    return bool(value)

@@ -125,11 +125,12 @@ def analyze_activity(
 
 
 def _basic_metrics(summary: dict[str, Any], points: list[TimeSeriesPoint]) -> BasicMetrics:
-    distance_m = _number(summary.get("distance")) or _last_number([p.distance_m for p in points])
-    duration_s = _number(summary.get("duration")) or _duration_from_points(points)
+    values = _summary_values(summary)
+    distance_m = _number(values.get("distance")) or _last_number([p.distance_m for p in points])
+    duration_s = _number(values.get("duration")) or _duration_from_points(points)
     distance_km = distance_m / 1000 if distance_m else None
     average_pace = duration_s / distance_km if duration_s and distance_km else None
-    activity_date = _activity_date(summary.get("startTimeLocal"))
+    activity_date = _activity_date(values.get("startTimeLocal"))
     return BasicMetrics(
         activity_id=str(summary["activityId"]),
         activity_name=summary.get("activityName"),
@@ -137,19 +138,20 @@ def _basic_metrics(summary: dict[str, Any], points: list[TimeSeriesPoint]) -> Ba
         distance_km=distance_km,
         duration_s=duration_s,
         average_pace_s_per_km=average_pace,
-        average_hr=_number(summary.get("averageHR") or summary.get("avgHR"))
+        average_hr=_number(values.get("averageHR") or values.get("avgHR"))
         or _average([p.heart_rate_bpm for p in points]),
-        max_hr=_number(summary.get("maxHR")) or _max([p.heart_rate_bpm for p in points]),
+        max_hr=_number(values.get("maxHR")) or _max([p.heart_rate_bpm for p in points]),
         elevation_gain_m=_number(
-            summary.get("elevationGain")
-            or summary.get("elevationGainInMeters")
-            or summary.get("totalAscent")
+            values.get("elevationGain")
+            or values.get("elevationGainInMeters")
+            or values.get("totalAscent")
         )
         or _elevation_gain(points),
         average_cadence_spm=_number(
-            summary.get("averageRunningCadenceInStepsPerMinute")
-            or summary.get("avgRunCadence")
-            or summary.get("averageCadence")
+            values.get("averageRunningCadenceInStepsPerMinute")
+            or values.get("averageRunCadence")
+            or values.get("avgRunCadence")
+            or values.get("averageCadence")
         )
         or _average([p.cadence_spm for p in points]),
     )
@@ -387,6 +389,17 @@ def _last_number(values: list[float | None]) -> float | None:
         if value is not None:
             return value
     return None
+
+
+def _summary_values(summary: dict[str, Any]) -> dict[str, Any]:
+    nested = summary.get("summaryDTO")
+    if isinstance(nested, dict):
+        merged = dict(nested)
+        for key in ("activityId", "activityName"):
+            if key in summary:
+                merged[key] = summary[key]
+        return merged
+    return summary
 
 
 def _elevation_gain(points: list[TimeSeriesPoint]) -> float | None:

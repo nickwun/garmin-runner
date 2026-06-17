@@ -249,7 +249,7 @@ def inspect(
                 _print_status("WARN", "FIT 解析", "解析返回错误，未展开原始记录")
             records = record_messages(messages)
             typer.echo(f"FIT records 数量: {len(records)}")
-            fields = sorted({key for record in records for key in record})
+            fields = sorted({str(key) for record in records for key in record})
             typer.echo("FIT 可用字段: " + (", ".join(fields) if fields else "N/A"))
             _print_missing_fit_warnings(fields)
         except Exception as exc:
@@ -515,44 +515,50 @@ def _format_int(value: object) -> str:
 
 
 def _print_summary_overview(summary: dict[str, object]) -> None:
-    activity_type = summary.get("activityType")
+    values = _summary_values(summary)
+    activity_type = summary.get("activityType") or summary.get("activityTypeDTO")
     if isinstance(activity_type, dict):
         activity_type_value = activity_type.get("typeKey") or activity_type.get("typeId")
     else:
         activity_type_value = activity_type
     fields = {
         "activity_id": summary.get("activityId"),
-        "start_time": summary.get("startTimeLocal") or summary.get("startTimeGMT"),
+        "start_time": values.get("startTimeLocal") or values.get("startTimeGMT"),
         "activity_type": activity_type_value,
         "name": summary.get("activityName"),
-        "distance": summary.get("distance"),
-        "duration": summary.get("duration"),
-        "moving_duration": summary.get("movingDuration"),
-        "average_hr": summary.get("averageHR") or summary.get("avgHR"),
-        "max_hr": summary.get("maxHR"),
-        "average_speed": summary.get("averageSpeed"),
-        "average_pace": summary.get("averagePace"),
+        "distance": values.get("distance"),
+        "duration": values.get("duration"),
+        "moving_duration": values.get("movingDuration"),
+        "average_hr": values.get("averageHR") or values.get("avgHR"),
+        "max_hr": values.get("maxHR"),
+        "average_speed": values.get("averageSpeed"),
+        "average_pace": values.get("averagePace"),
     }
     typer.echo("summary 关键字段:")
     for key, value in fields.items():
         typer.echo(f"- {key}: {_short_value(value, 80) if value is not None else 'N/A'}")
     missing = [key for key, value in fields.items() if value is None]
+    if fields.get("average_pace") is None and fields.get("average_speed") is not None:
+        missing = [key for key in missing if key != "average_pace"]
     if missing:
         _print_status("WARN", "summary 缺失字段", ", ".join(missing))
 
 
+def _summary_values(summary: dict[str, object]) -> dict[str, object]:
+    nested = summary.get("summaryDTO")
+    if isinstance(nested, dict):
+        return nested
+    return summary
+
+
 def _print_missing_fit_warnings(fields: list[str]) -> None:
-    interesting = [
-        "timestamp",
-        "distance",
-        "heart_rate",
-        "speed",
-        "enhanced_speed",
-        "cadence",
-        "altitude",
-        "position_lat",
-        "position_long",
-    ]
-    missing = [field for field in interesting if field not in fields]
+    missing = []
+    for field in ("timestamp", "distance", "heart_rate", "cadence", "position_lat", "position_long"):
+        if field not in fields:
+            missing.append(field)
+    if "speed" not in fields and "enhanced_speed" not in fields:
+        missing.append("speed/enhanced_speed")
+    if "altitude" not in fields and "enhanced_altitude" not in fields:
+        missing.append("altitude/enhanced_altitude")
     if missing:
         _print_status("WARN", "FIT 缺失字段", ", ".join(missing))

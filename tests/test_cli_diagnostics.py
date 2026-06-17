@@ -148,6 +148,76 @@ def test_doctor_reports_project_checks_without_secret_values(tmp_path: Path) -> 
     assert "secret" not in result.output
 
 
+def test_inspect_does_not_warn_when_alternative_speed_fields_exist(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    summary_path = tmp_path / "data" / "raw" / "summary" / "12345.json"
+    fit_path = tmp_path / "data" / "raw" / "fit" / "12345.fit"
+    summary_path.parent.mkdir(parents=True)
+    fit_path.parent.mkdir(parents=True)
+    summary_path.write_text(
+        """{
+  "activityId": 12345,
+  "activityName": "Morning Run",
+  "activityTypeDTO": {"typeKey": "running"},
+  "summaryDTO": {
+    "startTimeLocal": "2026-06-01T06:30:00",
+    "distance": 5000,
+    "duration": 1500,
+    "movingDuration": 1480,
+    "averageHR": 142,
+    "maxHR": 170,
+    "averageSpeed": 3.33
+  }
+}""",
+        encoding="utf-8",
+    )
+    fit_path.write_bytes(b"placeholder")
+    config = _write_config(tmp_path)
+    store = ActivityStore(tmp_path / "data" / "garmin-runner.sqlite")
+    store.initialize()
+    store.upsert_activity(
+        ActivityRecord(
+            activity_id="12345",
+            activity_type="running",
+            start_time_local="2026-06-01T06:30:00",
+            activity_name="Morning Run",
+            distance_m=5000,
+            duration_s=1500,
+            summary_path=str(summary_path),
+            fit_path=str(fit_path),
+        )
+    )
+    monkeypatch.setattr(
+        "garmin_runner.cli.decode_fit_messages",
+        lambda path: (
+            {
+                "record_mesgs": [
+                    {
+                        "timestamp": "t",
+                        "distance": 1,
+                        "heart_rate": 120,
+                        "enhanced_speed": 3.0,
+                        "cadence": 170,
+                        "enhanced_altitude": 10,
+                        "position_lat": 1,
+                        "position_long": 1,
+                    }
+                ]
+            },
+            [],
+        ),
+    )
+
+    result = runner.invoke(app, ["inspect", "12345", "--config", str(config)])
+
+    assert result.exit_code == 0
+    assert "summary 缺失字段" not in result.output
+    assert "speed/enhanced_speed" not in result.output
+    assert "altitude/enhanced_altitude" not in result.output
+
+
 def _write_config(tmp_path: Path) -> Path:
     config_dir = tmp_path / "config"
     config_dir.mkdir()

@@ -10,6 +10,8 @@ garmin:
   email_env: "GARMIN_EMAIL"
   password_env: "GARMIN_PASSWORD"
   token_store: "data/tokens"
+  # 中国区 Garmin Connect 用户使用 true（https://connect.garmin.cn/）。
+  is_cn: false
 
 storage:
   data_dir: "data"

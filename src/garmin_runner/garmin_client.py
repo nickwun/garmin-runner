@@ -27,7 +27,7 @@ def create_garmin_client(
     token_store = Path(settings.token_store)
     token_store.mkdir(parents=True, exist_ok=True)
 
-    api = Garmin()
+    api = Garmin(is_cn=settings.is_cn)
     try:
         api.login(str(token_store))
         return api
@@ -44,7 +44,7 @@ def create_garmin_client(
             ) from None
 
     try:
-        api = Garmin(email, password, is_cn=False, prompt_mfa=mfa_callback)
+        api = Garmin(email, password, is_cn=settings.is_cn, prompt_mfa=mfa_callback)
         api.login(str(token_store))
         return api
     except GarminConnectAuthenticationError as exc:

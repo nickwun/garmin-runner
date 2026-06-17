@@ -95,6 +95,40 @@ class ActivityStore:
             )
         return cursor.rowcount == 1
 
+    def refresh_activity(self, record: ActivityRecord) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE activities
+                SET activity_type = ?,
+                    start_time_local = ?,
+                    start_time_gmt = ?,
+                    activity_name = ?,
+                    distance_m = ?,
+                    duration_s = ?,
+                    average_hr = ?,
+                    max_hr = ?,
+                    calories = ?,
+                    summary_path = ?,
+                    fit_path = ?
+                WHERE activity_id = ?
+                """,
+                (
+                    record.activity_type,
+                    record.start_time_local,
+                    record.start_time_gmt,
+                    record.activity_name,
+                    record.distance_m,
+                    record.duration_s,
+                    record.average_hr,
+                    record.max_hr,
+                    record.calories,
+                    record.summary_path,
+                    record.fit_path,
+                    record.activity_id,
+                ),
+            )
+
     def has_activity(self, activity_id: str) -> bool:
         return self.get_activity(activity_id) is not None
 

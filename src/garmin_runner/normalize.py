@@ -11,7 +11,8 @@ def normalize_activity(
     fit_path: str,
 ) -> ActivityRecord:
     activity_id = str(activity["activityId"])
-    activity_type = activity.get("activityType")
+    summary = activity.get("summaryDTO") if isinstance(activity.get("summaryDTO"), dict) else activity
+    activity_type = activity.get("activityType") or activity.get("activityTypeDTO")
     if isinstance(activity_type, dict):
         activity_type_value = activity_type.get("typeKey") or activity_type.get("typeId")
     else:
@@ -20,14 +21,14 @@ def normalize_activity(
     return ActivityRecord(
         activity_id=activity_id,
         activity_type=str(activity_type_value) if activity_type_value is not None else None,
-        start_time_local=activity.get("startTimeLocal"),
-        start_time_gmt=activity.get("startTimeGMT"),
+        start_time_local=summary.get("startTimeLocal"),
+        start_time_gmt=summary.get("startTimeGMT"),
         activity_name=activity.get("activityName"),
-        distance_m=_number(activity.get("distance")),
-        duration_s=_number(activity.get("duration")),
-        average_hr=_number(activity.get("averageHR") or activity.get("avgHR")),
-        max_hr=_number(activity.get("maxHR")),
-        calories=_number(activity.get("calories")),
+        distance_m=_number(summary.get("distance")),
+        duration_s=_number(summary.get("duration")),
+        average_hr=_number(summary.get("averageHR") or summary.get("avgHR")),
+        max_hr=_number(summary.get("maxHR")),
+        calories=_number(summary.get("calories")),
         summary_path=summary_path,
         fit_path=fit_path,
     )
