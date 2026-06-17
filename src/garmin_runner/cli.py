@@ -465,6 +465,11 @@ def _weekly_activity_from_row(
     points = extract_time_series(messages)
     analysis = analyze_activity(summary, points, training_config)
     report_path = write_daily_report(analysis, reports_dir)
+    intensity_distance = None
+    intensity_duration = None
+    if analysis.workout_breakdown is not None:
+        intensity_distance = analysis.workout_breakdown.main.distance_km
+        intensity_duration = analysis.workout_breakdown.main.duration_s
     return WeeklyActivity(
         activity_id=analysis.basic.activity_id,
         activity_date=analysis.basic.activity_date,
@@ -475,6 +480,8 @@ def _weekly_activity_from_row(
         training_type=analysis.training_type,
         execution_score=analysis.execution_score,
         report_path=report_path,
+        intensity_distance_km=intensity_distance,
+        intensity_duration_s=intensity_duration,
     )
 
 

@@ -315,6 +315,53 @@ def test_two_kilometer_repeats_are_threshold_intervals() -> None:
     assert analysis.heart_rate_drift.applicable is False
 
 
+def test_threshold_intervals_split_warmup_main_and_cooldown() -> None:
+    summary = {
+        "activityId": "split-interval",
+        "activityName": "福州市 - 3×2 公里",
+        "startTimeLocal": "2026-06-18T05:47:22",
+        "distance": 14000.0,
+        "duration": 4800.0,
+        "averageHR": 150,
+        "maxHR": 176,
+    }
+
+    analysis = analyze_activity(
+        summary,
+        _interval_points(),
+        _training_config_from_image(),
+    )
+
+    assert analysis.training_type == "阈值间歇"
+    assert analysis.workout_breakdown is not None
+    assert analysis.workout_breakdown.warmup.distance_km == 3.0
+    assert analysis.workout_breakdown.main.distance_km == 8.0
+    assert analysis.workout_breakdown.cooldown.distance_km == 3.0
+    assert analysis.workout_breakdown.quality.distance_km == 6.0
+
+
+def test_daily_report_renders_interval_breakdown(tmp_path: Path) -> None:
+    summary = {
+        "activityId": "split-report",
+        "activityName": "福州市 - 3×2 公里",
+        "startTimeLocal": "2026-06-18T05:47:22",
+        "distance": 14000.0,
+        "duration": 4800.0,
+        "averageHR": 150,
+        "maxHR": 176,
+    }
+    analysis = analyze_activity(summary, _interval_points(), _training_config_from_image())
+
+    path = write_daily_report(analysis, tmp_path)
+    content = path.read_text(encoding="utf-8")
+
+    assert "## 分段拆解" in content
+    assert "热身：3.0 km" in content
+    assert "阈值间歇训练段：8.0 km" in content
+    assert "阈值快段：6.0 km" in content
+    assert "冷身：3.0 km" in content
+
+
 def test_missing_fit_fields_lower_analysis_confidence() -> None:
     summary = {
         "activityId": "missing-fields",
@@ -440,6 +487,36 @@ def _steady_points(
             (int(duration_s), distance_m, heart_rate, distance_m / duration_s),
         ]
     )
+
+
+def _interval_points() -> list[TimeSeriesPoint]:
+    rows = [
+        # 3 km warmup at 6:00/km
+        (0, 0, 125, 2.78),
+        (1080, 3000, 140, 2.78),
+        # 3 x 2 km fast with 1 km easy recoveries between reps
+        (1080, 3000, 150, 4.17),
+        (1560, 5000, 170, 4.17),
+        (1920, 6000, 145, 2.78),
+        (2400, 8000, 172, 4.17),
+        (2760, 9000, 145, 2.78),
+        (3240, 11000, 174, 4.17),
+        # 3 km cooldown
+        (4320, 14000, 135, 2.78),
+    ]
+    start = datetime(2026, 6, 1, 6, 30, 0)
+    return [
+        TimeSeriesPoint(
+            timestamp=start + timedelta(seconds=offset_s),
+            elapsed_s=float(offset_s),
+            distance_m=distance_m,
+            heart_rate_bpm=heart_rate,
+            speed_mps=speed_mps,
+            cadence_spm=None,
+            altitude_m=None,
+        )
+        for offset_s, distance_m, heart_rate, speed_mps in rows
+    ]
 
 
 def _training_config_from_image() -> TrainingConfig:

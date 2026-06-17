@@ -25,7 +25,15 @@ def test_weekly_report_calculates_volume_structure_and_risks(tmp_path: Path) -> 
             week_end=date(2026, 6, 21),
             activities=[
                 _activity("easy", date(2026, 6, 16), 14, 5400, "E 跑"),
-                _activity("quality", date(2026, 6, 17), 16, 4800, "阈值间歇"),
+                _activity(
+                    "quality",
+                    date(2026, 6, 17),
+                    16,
+                    4800,
+                    "阈值间歇",
+                    intensity_distance_km=8,
+                    intensity_duration_s=2400,
+                ),
                 _activity("steady", date(2026, 6, 19), 12, 3600, "稳态跑"),
                 _activity("long", date(2026, 6, 21), 28, 9000, "长距离"),
             ],
@@ -40,6 +48,8 @@ def test_weekly_report_calculates_volume_structure_and_risks(tmp_path: Path) -> 
     assert analysis.rest_days == 3
     assert analysis.long_run_distance_ratio == 0.4
     assert analysis.high_intensity_count == 1
+    assert analysis.high_intensity.distance_km == 8
+    assert analysis.high_intensity.duration_s == 2400
     assert analysis.high_intensity_time_ratio > 0
     assert analysis.conclusion in {"有效刺激", "稳定积累"}
     assert len(analysis.key_workouts) == 3
@@ -50,6 +60,8 @@ def test_weekly_report_calculates_volume_structure_and_risks(tmp_path: Path) -> 
     assert "## 本周结论" in content
     assert "## 训练量" in content
     assert "## 强度结构" in content
+    assert "阈值/间歇主训练段：8.0 km" in content
+    assert "总 16.0 km / 主训练 8.0 km" in content
     assert "## 下周建议" in content
     assert "## 禁止事项" in content
 
@@ -151,6 +163,8 @@ def _activity(
     distance_km: float,
     duration_s: float,
     training_type: str,
+    intensity_distance_km: float | None = None,
+    intensity_duration_s: float | None = None,
 ) -> WeeklyActivity:
     return WeeklyActivity(
         activity_id=activity_id,
@@ -162,4 +176,6 @@ def _activity(
         training_type=training_type,
         execution_score=90,
         report_path=Path(f"reports/daily/{activity_id}.md"),
+        intensity_distance_km=intensity_distance_km,
+        intensity_duration_s=intensity_duration_s,
     )

@@ -161,6 +161,7 @@ reports/daily/YYYY-MM-DD_<activity_id>.md
 ## 生成周训练报告
 
 周报会读取 SQLite 中已同步活动，并复用单次训练分析结果生成周级训练量、强度结构、关键训练、风险信号和下周建议。
+对 `阈值间歇` 这类整段 FIT 记录，单次报告会拆出热身、主训练、快段和冷身；周报的阈值/间歇统计使用主训练段，不把整条活动都算作高强度。
 
 ```bash
 garmin-runner report weekly --week current

@@ -18,7 +18,8 @@ def render_weekly_report(analysis: WeeklyAnalysis) -> str:
         "- "
         + f"{item.activity.activity_date.isoformat()} "
         + f"{item.activity.training_type} "
-        + f"{item.activity.distance_km:.1f} km，"
+        + _format_key_workout_distance(item.activity)
+        + "，"
         + f"{item.comment}"
         for item in analysis.key_workouts
     ) or "- 无关键训练"
@@ -49,7 +50,7 @@ def render_weekly_report(analysis: WeeklyAnalysis) -> str:
 
 - 恢复跑/MAF/E 跑：{analysis.easy.distance_km:.1f} km，{_format_duration(analysis.easy.duration_s)}
 - 稳态跑：{analysis.steady.distance_km:.1f} km，{_format_duration(analysis.steady.duration_s)}
-- 阈值/间歇：{analysis.high_intensity.distance_km:.1f} km，{_format_duration(analysis.high_intensity.duration_s)}
+- 阈值/间歇主训练段：{analysis.high_intensity.distance_km:.1f} km，{_format_duration(analysis.high_intensity.duration_s)}
 - 长距离：{analysis.long_run.distance_km:.1f} km，{_format_duration(analysis.long_run.duration_s)}
 - 辅助/热身冷身：{analysis.auxiliary.distance_km:.1f} km，{_format_duration(analysis.auxiliary.duration_s)}
 - 高强度次数：{analysis.high_intensity_count}
@@ -95,3 +96,10 @@ def _format_delta(delta_km: float | None, delta_pct: float | None) -> str:
         return "N/A"
     sign = "+" if delta_km >= 0 else ""
     return f"{sign}{delta_km:.1f} km（{sign}{delta_pct:.1f}%）"
+
+
+def _format_key_workout_distance(activity: object) -> str:
+    intensity_distance = getattr(activity, "intensity_distance_km", None)
+    if intensity_distance is not None:
+        return f"总 {activity.distance_km:.1f} km / 主训练 {intensity_distance:.1f} km"
+    return f"{activity.distance_km:.1f} km"

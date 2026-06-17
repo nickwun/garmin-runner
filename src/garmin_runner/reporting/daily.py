@@ -45,6 +45,7 @@ def render_daily_report(analysis: SingleActivityAnalysis) -> str:
         if analysis.heart_rate_drift.applicable
         else f"- 心率漂移：{analysis.heart_rate_drift.label}（{analysis.heart_rate_drift.reason or '不适用于本次训练'}）"
     )
+    breakdown = _render_workout_breakdown(analysis)
     return f"""# {basic.activity_date.isoformat()} 单次训练报告
 
 活动：{basic.activity_name or basic.activity_id}
@@ -72,6 +73,8 @@ def render_daily_report(analysis: SingleActivityAnalysis) -> str:
 {drift_line}
 
 {zone_lines}
+
+{breakdown}
 
 ## 不适用指标说明
 
@@ -124,3 +127,15 @@ def _format_float(value: float | None, suffix: str) -> str:
     if value is None:
         return "N/A"
     return f"{value:.1f}{suffix}"
+
+
+def _render_workout_breakdown(analysis: SingleActivityAnalysis) -> str:
+    breakdown = analysis.workout_breakdown
+    if breakdown is None:
+        return ""
+    phases = [breakdown.warmup, breakdown.main, breakdown.quality, breakdown.cooldown]
+    lines = [
+        f"- {phase.name}：{phase.distance_km:.1f} km，{_format_duration(phase.duration_s)}，{_format_pace(phase.average_pace_s_per_km)}"
+        for phase in phases
+    ]
+    return "## 分段拆解\n\n" + "\n".join(lines)

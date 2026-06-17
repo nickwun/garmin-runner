@@ -93,6 +93,22 @@ class TrainingGuidance:
 
 
 @dataclass(frozen=True)
+class WorkoutPhase:
+    name: str
+    distance_km: float
+    duration_s: float
+    average_pace_s_per_km: float | None
+
+
+@dataclass(frozen=True)
+class WorkoutBreakdown:
+    warmup: WorkoutPhase
+    main: WorkoutPhase
+    cooldown: WorkoutPhase
+    quality: WorkoutPhase
+
+
+@dataclass(frozen=True)
 class SingleActivityAnalysis:
     basic: BasicMetrics
     hr_zones: HeartRateZoneSummary
@@ -104,6 +120,7 @@ class SingleActivityAnalysis:
     confidence: AnalysisConfidence
     not_applicable_notes: tuple[str, ...]
     guidance: TrainingGuidance
+    workout_breakdown: WorkoutBreakdown | None = None
 
 
 def training_config_from_settings(settings: Any) -> TrainingConfig:
@@ -136,6 +153,7 @@ def analyze_activity(
     hr_zones = _hr_zone_summary(points, config.heart_rate_zones)
     pace_stability = _pace_stability(points)
     training_type = _classify_training(summary, basic, hr_zones, pace_stability, config)
+    workout_breakdown = _workout_breakdown(points, training_type)
     drift = _heart_rate_drift(summary, points, training_type, pace_stability)
     confidence = _analysis_confidence(summary, basic, points, pace_stability, training_type)
     not_applicable_notes = _not_applicable_notes(drift, confidence)
@@ -155,6 +173,7 @@ def analyze_activity(
         confidence=confidence,
         not_applicable_notes=not_applicable_notes,
         guidance=guidance,
+        workout_breakdown=workout_breakdown,
     )
 
 
@@ -508,6 +527,103 @@ def _split_paces(points: list[TimeSeriesPoint], split_m: float = 1000.0) -> list
     if len(paces) < 2:
         return _segment_paces(points)
     return paces
+
+
+@dataclass(frozen=True)
+class _Chunk:
+    start_m: float
+    end_m: float
+    distance_m: float
+    duration_s: float
+    pace_s_per_km: float
+
+
+def _workout_breakdown(
+    points: list[TimeSeriesPoint],
+    training_type: str,
+) -> WorkoutBreakdown | None:
+    if training_type != "阈值间歇":
+        return None
+    chunks = _distance_chunks(points)
+    if len(chunks) < 3:
+        return None
+    paces = [chunk.pace_s_per_km for chunk in chunks]
+    if max(paces) - min(paces) < 20:
+        return None
+    fast_cutoff = min(paces) + (max(paces) - min(paces)) * 0.45
+    fast_indexes = [
+        index for index, chunk in enumerate(chunks) if chunk.pace_s_per_km <= fast_cutoff
+    ]
+    if not fast_indexes:
+        return None
+
+    first_fast = fast_indexes[0]
+    last_fast = fast_indexes[-1]
+    warmup = chunks[:first_fast]
+    main = chunks[first_fast : last_fast + 1]
+    cooldown = chunks[last_fast + 1 :]
+    quality = [chunks[index] for index in fast_indexes]
+    if not main:
+        return None
+    return WorkoutBreakdown(
+        warmup=_phase("热身", warmup),
+        main=_phase("阈值间歇训练段", main),
+        cooldown=_phase("冷身", cooldown),
+        quality=_phase("阈值快段", quality),
+    )
+
+
+def _distance_chunks(
+    points: list[TimeSeriesPoint],
+    chunk_m: float = 500.0,
+) -> list[_Chunk]:
+    chunks: list[_Chunk] = []
+    acc_distance = 0.0
+    acc_duration = 0.0
+    start_m: float | None = None
+    end_m = 0.0
+    for previous, current, duration, distance in _valid_segments(points):
+        if start_m is None:
+            start_m = previous.distance_m or end_m
+        acc_distance += distance
+        acc_duration += duration
+        end_m = current.distance_m if current.distance_m is not None else end_m + distance
+        if acc_distance >= chunk_m:
+            chunks.append(
+                _Chunk(
+                    start_m=start_m,
+                    end_m=end_m,
+                    distance_m=acc_distance,
+                    duration_s=acc_duration,
+                    pace_s_per_km=acc_duration / (acc_distance / 1000),
+                )
+            )
+            start_m = end_m
+            acc_distance = 0.0
+            acc_duration = 0.0
+    if acc_distance > 0 and acc_duration > 0 and start_m is not None:
+        chunks.append(
+            _Chunk(
+                start_m=start_m,
+                end_m=end_m,
+                distance_m=acc_distance,
+                duration_s=acc_duration,
+                pace_s_per_km=acc_duration / (acc_distance / 1000),
+            )
+        )
+    return chunks
+
+
+def _phase(name: str, chunks: list[_Chunk]) -> WorkoutPhase:
+    distance = sum(chunk.distance_m for chunk in chunks) / 1000
+    duration = sum(chunk.duration_s for chunk in chunks)
+    pace = duration / distance if duration and distance else None
+    return WorkoutPhase(
+        name=name,
+        distance_km=round(distance, 2),
+        duration_s=duration,
+        average_pace_s_per_km=pace,
+    )
 
 
 def _pace_hr_ratio(

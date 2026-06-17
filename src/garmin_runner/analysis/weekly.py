@@ -35,6 +35,8 @@ class WeeklyActivity:
     training_type: str
     execution_score: int
     report_path: Path
+    intensity_distance_km: float | None = None
+    intensity_duration_s: float | None = None
 
 
 @dataclass(frozen=True)
@@ -181,9 +183,27 @@ def _bucket(
         else [item for item in activities if item.training_type in training_types]
     )
     return IntensityBucket(
-        distance_km=round(sum(item.distance_km for item in selected), 2),
-        duration_s=sum(item.duration_s for item in selected),
+        distance_km=round(sum(_bucket_distance(item) for item in selected), 2),
+        duration_s=sum(_bucket_duration(item) for item in selected),
     )
+
+
+def _bucket_distance(activity: WeeklyActivity) -> float:
+    if (
+        activity.training_type in HIGH_INTENSITY_TYPES
+        and activity.intensity_distance_km is not None
+    ):
+        return activity.intensity_distance_km
+    return activity.distance_km
+
+
+def _bucket_duration(activity: WeeklyActivity) -> float:
+    if (
+        activity.training_type in HIGH_INTENSITY_TYPES
+        and activity.intensity_duration_s is not None
+    ):
+        return activity.intensity_duration_s
+    return activity.duration_s
 
 
 def _delta(current: float, baseline: float | None) -> tuple[float | None, float | None]:
