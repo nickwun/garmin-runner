@@ -35,3 +35,12 @@ training:
     sprint_high: 194
   long_run_min_distance_km: 18
   long_run_min_duration_min: 90
+  weekly_structure:
+    rest_day: "monday"
+    normal_volume_min_km: 100
+    normal_volume_max_km: 120
+    tuesday_quality: true
+    friday_steady: true
+    weekend_long_run: true
+    marathon_goal: "年底 2:45 全马目标"
+    b_race_note: "东营作为 B 赛测试，不全力"

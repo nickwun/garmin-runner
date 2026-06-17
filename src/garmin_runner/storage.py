@@ -163,6 +163,32 @@ class ActivityStore:
             rows = conn.execute(query, params).fetchall()
         return [dict(row) for row in rows]
 
+    def list_activities_between(self, since: str, until: str) -> list[dict[str, Any]]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM activities
+                WHERE substr(start_time_local, 1, 10) >= ?
+                  AND substr(start_time_local, 1, 10) <= ?
+                ORDER BY start_time_local, activity_id
+                """,
+                (since, until),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def sum_distance_between(self, since: str, until: str) -> float:
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT COALESCE(SUM(distance_m), 0) AS distance_m
+                FROM activities
+                WHERE substr(start_time_local, 1, 10) >= ?
+                  AND substr(start_time_local, 1, 10) <= ?
+                """,
+                (since, until),
+            ).fetchone()
+        return float(row["distance_m"] or 0) / 1000
+
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row

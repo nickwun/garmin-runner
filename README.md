@@ -52,6 +52,15 @@ training:
     sprint_high: 194
   long_run_min_distance_km: 18
   long_run_min_duration_min: 90
+  weekly_structure:
+    rest_day: "monday"
+    normal_volume_min_km: 100
+    normal_volume_max_km: 120
+    tuesday_quality: true
+    friday_steady: true
+    weekend_long_run: true
+    marathon_goal: "年底 2:45 全马目标"
+    b_race_note: "东营作为 B 赛测试，不全力"
 ```
 
 如果你的 Garmin Connect 是中国区账号（`https://connect.garmin.cn/`），请确认：
@@ -148,6 +157,24 @@ reports/daily/YYYY-MM-DD_<activity_id>.md
 - 教练指令
 
 第一版教练指令来自规则引擎，不调用 LLM。
+
+## 生成周训练报告
+
+周报会读取 SQLite 中已同步活动，并复用单次训练分析结果生成周级训练量、强度结构、关键训练、风险信号和下周建议。
+
+```bash
+garmin-runner report weekly --week current
+garmin-runner report weekly --week 2026-W25
+garmin-runner report weekly --since 2026-06-15 --until 2026-06-21
+```
+
+输出路径：
+
+```text
+reports/weekly/YYYY-Www.md
+```
+
+周训练结构来自 `config/athlete.yaml` 的 `training.weekly_structure`，默认包含周一全休、周二强度、周五稳态、周末长距离、常态周跑量 100-120km、年底 2:45 全马目标，以及东营 B 赛测试说明。
 
 ## 真实数据验收
 

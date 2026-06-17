@@ -40,6 +40,14 @@ class TrainingSettings:
     sprint_high: int = 194
     long_run_min_distance_km: float = 18.0
     long_run_min_duration_min: float = 90.0
+    weekly_rest_day: str = "monday"
+    normal_weekly_volume_min_km: float = 100.0
+    normal_weekly_volume_max_km: float = 120.0
+    tuesday_quality: bool = True
+    friday_steady: bool = True
+    weekend_long_run: bool = True
+    marathon_goal: str = "年底 2:45 全马目标"
+    b_race_note: str = "东营作为 B 赛测试，不全力"
 
 
 @dataclass(frozen=True)
@@ -67,6 +75,7 @@ def load_settings(config_path: Path = Path("config/athlete.yaml")) -> AppSetting
     storage_data = data.get("storage", {})
     training_data = data.get("training", {})
     hr_zones_data = training_data.get("heart_rate_zones", {})
+    weekly_structure_data = training_data.get("weekly_structure", {})
     new_zone_keys = {
         "recovery_low",
         "recovery_high",
@@ -127,6 +136,22 @@ def load_settings(config_path: Path = Path("config/athlete.yaml")) -> AppSetting
             ),
             long_run_min_duration_min=float(
                 training_data.get("long_run_min_duration_min", 90.0)
+            ),
+            weekly_rest_day=str(weekly_structure_data.get("rest_day", "monday")),
+            normal_weekly_volume_min_km=float(
+                weekly_structure_data.get("normal_volume_min_km", 100.0)
+            ),
+            normal_weekly_volume_max_km=float(
+                weekly_structure_data.get("normal_volume_max_km", 120.0)
+            ),
+            tuesday_quality=_bool(weekly_structure_data.get("tuesday_quality", True)),
+            friday_steady=_bool(weekly_structure_data.get("friday_steady", True)),
+            weekend_long_run=_bool(weekly_structure_data.get("weekend_long_run", True)),
+            marathon_goal=str(
+                weekly_structure_data.get("marathon_goal", "年底 2:45 全马目标")
+            ),
+            b_race_note=str(
+                weekly_structure_data.get("b_race_note", "东营作为 B 赛测试，不全力")
             ),
         ),
     )

@@ -5,7 +5,7 @@ import os
 import sys
 import tomllib
 import getpass
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Annotated
 
@@ -16,14 +16,23 @@ from garmin_runner.analysis.single_activity import (
     analyze_activity,
     training_config_from_settings,
 )
+from garmin_runner.analysis.weekly import (
+    WeeklyActivity,
+    WeeklyContext,
+    WeeklyTrainingStructure,
+    analyze_week,
+)
 from garmin_runner.config import load_settings
 from garmin_runner.fit import decode_fit_messages, extract_time_series, record_messages
 from garmin_runner.garmin_client import GarminRunnerLoginError, create_garmin_client
 from garmin_runner.reporting.daily import write_daily_report
+from garmin_runner.reporting.weekly import write_weekly_report
 from garmin_runner.storage import ActivityStore
 from garmin_runner.sync import sync_running_activities
 
 app = typer.Typer(help="Local-first Garmin running data sync and analysis toolkit.")
+report_app = typer.Typer(help="Generate deterministic training reports.")
+app.add_typer(report_app, name="report")
 
 
 @app.callback()
@@ -100,6 +109,71 @@ def analyze(
         raise typer.Exit(code=1) from exc
 
     typer.echo(f"报告已生成：{report_path}")
+
+
+@report_app.command("weekly")
+def weekly_report(
+    week: Annotated[
+        str | None,
+        typer.Option("--week", help="ISO 周，例如 current 或 2026-W25。"),
+    ] = "current",
+    since: Annotated[
+        str | None,
+        typer.Option("--since", help="自定义周期开始日期，格式 YYYY-MM-DD。"),
+    ] = None,
+    until: Annotated[
+        str | None,
+        typer.Option("--until", help="自定义周期结束日期，格式 YYYY-MM-DD。"),
+    ] = None,
+    config: Annotated[
+        Path,
+        typer.Option("--config", help="本地配置文件路径。"),
+    ] = Path("config/athlete.yaml"),
+) -> None:
+    """Generate a Chinese Markdown weekly training report."""
+    if not config.exists():
+        typer.secho(f"缺少本地配置文件：{config}", fg=typer.colors.RED)
+        raise typer.Exit(code=1)
+    try:
+        week_start, week_end = _weekly_range(week=week, since=since, until=until)
+        settings = load_settings(config)
+        store = ActivityStore(settings.storage.database_path)
+        if not settings.storage.database_path.exists():
+            raise ValueError("SQLite 数据库不存在，请先运行 sync。")
+        training_config = training_config_from_settings(settings)
+        activities = [
+            _weekly_activity_from_row(row, settings.storage.reports_dir, training_config)
+            for row in store.list_activities_between(
+                week_start.isoformat(), week_end.isoformat()
+            )
+        ]
+        previous_start = week_start - timedelta(days=7)
+        previous_end = week_start - timedelta(days=1)
+        previous_distance = store.sum_distance_between(
+            previous_start.isoformat(), previous_end.isoformat()
+        )
+        four_week_start = week_start - timedelta(days=28)
+        four_week_end = week_start - timedelta(days=1)
+        recent_4w_distance = store.sum_distance_between(
+            four_week_start.isoformat(), four_week_end.isoformat()
+        )
+        recent_4w_avg = recent_4w_distance / 4 if recent_4w_distance else None
+        analysis = analyze_week(
+            WeeklyContext(
+                week_start=week_start,
+                week_end=week_end,
+                activities=activities,
+                previous_week_distance_km=previous_distance,
+                recent_4w_avg_distance_km=recent_4w_avg,
+                structure=_weekly_structure_from_settings(settings),
+            )
+        )
+        report_path = write_weekly_report(analysis, settings.storage.reports_dir)
+    except Exception as exc:
+        typer.secho(f"周报生成失败：{exc}", fg=typer.colors.RED)
+        raise typer.Exit(code=1) from exc
+
+    typer.echo(f"周报已生成：{report_path}")
 
 
 @app.command()
@@ -329,6 +403,79 @@ def _parse_date(value: str) -> date:
         return datetime.strptime(value, "%Y-%m-%d").date()
     except ValueError as exc:
         raise typer.BadParameter("日期格式必须是 YYYY-MM-DD") from exc
+
+
+def _weekly_range(
+    week: str | None,
+    since: str | None,
+    until: str | None,
+) -> tuple[date, date]:
+    if since or until:
+        if not since or not until:
+            raise ValueError("--since 和 --until 必须同时提供。")
+        start = _parse_date(since)
+        end = _parse_date(until)
+        if end < start:
+            raise ValueError("--until 不能早于 --since。")
+        return start, end
+
+    value = week or "current"
+    if value == "current":
+        today = date.today()
+        start = today - timedelta(days=today.weekday())
+        return start, start + timedelta(days=6)
+    try:
+        year_text, week_text = value.split("-W", 1)
+        start = date.fromisocalendar(int(year_text), int(week_text), 1)
+    except (ValueError, TypeError) as exc:
+        raise ValueError("--week 必须是 current 或 YYYY-Www，例如 2026-W25。") from exc
+    return start, start + timedelta(days=6)
+
+
+def _weekly_structure_from_settings(settings: object) -> WeeklyTrainingStructure:
+    training = settings.training
+    return WeeklyTrainingStructure(
+        rest_day=training.weekly_rest_day,
+        normal_volume_min_km=training.normal_weekly_volume_min_km,
+        normal_volume_max_km=training.normal_weekly_volume_max_km,
+        tuesday_quality=training.tuesday_quality,
+        friday_steady=training.friday_steady,
+        weekend_long_run=training.weekend_long_run,
+        marathon_goal=training.marathon_goal,
+        b_race_note=training.b_race_note,
+    )
+
+
+def _weekly_activity_from_row(
+    activity: dict[str, object],
+    reports_dir: Path,
+    training_config: object,
+) -> WeeklyActivity:
+    summary_path = _resolve_local_path(str(activity["summary_path"]))
+    fit_path = _resolve_local_path(str(activity["fit_path"]))
+    if not summary_path.exists():
+        raise FileNotFoundError(f"找不到 summary JSON：{summary_path}")
+    if not fit_path.exists():
+        raise FileNotFoundError(f"找不到 FIT 文件：{fit_path}")
+
+    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    messages, errors = decode_fit_messages(fit_path)
+    if errors:
+        raise ValueError(f"FIT 解析失败，activity_id={activity['activity_id']}")
+    points = extract_time_series(messages)
+    analysis = analyze_activity(summary, points, training_config)
+    report_path = write_daily_report(analysis, reports_dir)
+    return WeeklyActivity(
+        activity_id=analysis.basic.activity_id,
+        activity_date=analysis.basic.activity_date,
+        activity_name=analysis.basic.activity_name,
+        distance_km=analysis.basic.distance_km or 0.0,
+        duration_s=analysis.basic.duration_s or 0.0,
+        average_hr=analysis.basic.average_hr,
+        training_type=analysis.training_type,
+        execution_score=analysis.execution_score,
+        report_path=report_path,
+    )
 
 
 def _resolve_local_path(value: str) -> Path:
