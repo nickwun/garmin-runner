@@ -177,6 +177,23 @@ reports/weekly/YYYY-Www.md
 
 周训练结构来自 `config/athlete.yaml` 的 `training.weekly_structure`，默认包含周一全休、周二强度、周五稳态、周末长距离、常态周跑量 100-120km、年底 2:45 全马目标，以及东营 B 赛测试说明。
 
+## 生成月训练报告
+
+月报会读取当月已同步活动，复用单次训练分析和分段结果，生成月跑量、周跑量分布、强度结构、能力趋势、疲劳趋势、目标意义和下月建议。
+
+```bash
+garmin-runner report monthly --month current
+garmin-runner report monthly --month 2026-06
+```
+
+输出路径：
+
+```text
+reports/monthly/YYYY-MM.md
+```
+
+月报仍使用确定性规则，不调用 LLM；阈值/间歇和结构化稳态优先按主训练段统计。
+
 ## 真实数据验收
 
 检查本地环境、配置、目录、SQLite 和 Garmin 登录状态：

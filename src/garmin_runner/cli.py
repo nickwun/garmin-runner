@@ -16,6 +16,11 @@ from garmin_runner.analysis.single_activity import (
     analyze_activity,
     training_config_from_settings,
 )
+from garmin_runner.analysis.monthly import (
+    MonthlyContext,
+    analyze_month,
+    month_bounds,
+)
 from garmin_runner.analysis.weekly import (
     WeeklyActivity,
     WeeklyContext,
@@ -26,6 +31,7 @@ from garmin_runner.config import load_settings
 from garmin_runner.fit import decode_fit_messages, extract_time_series, record_messages
 from garmin_runner.garmin_client import GarminRunnerLoginError, create_garmin_client
 from garmin_runner.reporting.daily import write_daily_report
+from garmin_runner.reporting.monthly import write_monthly_report
 from garmin_runner.reporting.weekly import write_weekly_report
 from garmin_runner.storage import ActivityStore
 from garmin_runner.sync import sync_running_activities
@@ -174,6 +180,50 @@ def weekly_report(
         raise typer.Exit(code=1) from exc
 
     typer.echo(f"周报已生成：{report_path}")
+
+
+@report_app.command("monthly")
+def monthly_report(
+    month: Annotated[
+        str,
+        typer.Option("--month", help="月份，例如 current 或 2026-06。"),
+    ] = "current",
+    config: Annotated[
+        Path,
+        typer.Option("--config", help="本地配置文件路径。"),
+    ] = Path("config/athlete.yaml"),
+) -> None:
+    """Generate a Chinese Markdown monthly training report."""
+    if not config.exists():
+        typer.secho(f"缺少本地配置文件：{config}", fg=typer.colors.RED)
+        raise typer.Exit(code=1)
+    try:
+        month_start, month_end = month_bounds(month)
+        settings = load_settings(config)
+        store = ActivityStore(settings.storage.database_path)
+        if not settings.storage.database_path.exists():
+            raise ValueError("SQLite 数据库不存在，请先运行 sync。")
+        training_config = training_config_from_settings(settings)
+        activities = [
+            _weekly_activity_from_row(row, settings.storage.reports_dir, training_config)
+            for row in store.list_activities_between(
+                month_start.isoformat(), month_end.isoformat()
+            )
+        ]
+        analysis = analyze_month(
+            MonthlyContext(
+                month_start=month_start,
+                month_end=month_end,
+                activities=activities,
+                structure=_weekly_structure_from_settings(settings),
+            )
+        )
+        report_path = write_monthly_report(analysis, settings.storage.reports_dir)
+    except Exception as exc:
+        typer.secho(f"月报生成失败：{exc}", fg=typer.colors.RED)
+        raise typer.Exit(code=1) from exc
+
+    typer.echo(f"月报已生成：{report_path}")
 
 
 @app.command()
