@@ -17,7 +17,7 @@ GitHub: [nickwun/garmin-runner](https://github.com/nickwun/garmin-runner)
 
 后续阶段会在 `analysis` 和 `reporting` 层加入确定性训练指标、规则判断和中文 Markdown 报告生成。
 
-## 安装
+## 从零开始安装
 
 需要 Python 3.11+。
 
@@ -27,7 +27,7 @@ source .venv/bin/activate
 pip install -e ".[dev]"
 ```
 
-## 配置
+## 初始化配置
 
 复制示例配置：
 
@@ -35,24 +35,7 @@ pip install -e ".[dev]"
 cp config/athlete.example.yaml config/athlete.yaml
 ```
 
-创建 `.env`：
-
-```bash
-GARMIN_EMAIL=you@example.com
-GARMIN_PASSWORD=your-password
-```
-
-`config/athlete.yaml`、`.env`、Garmin token、原始 FIT 文件、SQLite 数据库和本地报告都已加入 `.gitignore`，不要提交到 Git。
-
-默认本地数据位置：
-
-- token: `data/tokens`
-- SQLite: `data/garmin-runner.sqlite`
-- summary JSON: `data/raw/summary`
-- FIT: `data/raw/fit`
-- report: `reports/daily`
-
-单次训练分析需要在 `config/athlete.yaml` 中填写个人训练区间：
+根据你的训练情况编辑 `config/athlete.yaml`，尤其是心率区间：
 
 ```yaml
 training:
@@ -65,6 +48,54 @@ training:
   long_run_min_duration_min: 90
 ```
 
+## 设置凭证
+
+推荐使用交互式命令创建本地 `.env`：
+
+```bash
+garmin-runner setup-credentials
+```
+
+它会询问 Garmin email，并用隐藏输入询问 Garmin password。如果 `.env` 已存在，会要求选择：
+
+- `overwrite`
+- `keep`
+- `backup and overwrite`
+
+如果你不想保存密码，可以只保存 email：
+
+```bash
+garmin-runner setup-credentials --email-only
+```
+
+然后通过系统环境变量或手动方式提供 `GARMIN_PASSWORD`。
+
+字段名也可以参考 [.env.example](.env.example)，但不要把真实 `.env` 提交到 Git。
+
+`config/athlete.yaml`、`.env`、Garmin token、原始 FIT 文件、SQLite 数据库和本地报告都已加入 `.gitignore`，不要提交到 Git。
+
+默认本地数据位置：
+
+- token: `data/tokens`
+- SQLite: `data/garmin-runner.sqlite`
+- summary JSON: `data/raw/summary`
+- FIT: `data/raw/fit`
+- report: `reports/daily`
+
+## 运行 Doctor
+
+先检查本地环境、配置、目录、SQLite 和 Garmin 登录状态：
+
+```bash
+garmin-runner doctor
+```
+
+如果只想离线检查本地配置，不登录 Garmin：
+
+```bash
+garmin-runner doctor --skip-login
+```
+
 ## 运行同步
 
 ```bash
@@ -73,11 +104,14 @@ garmin-runner sync --since 2026-01-01
 
 首次登录可能需要 Garmin MFA 验证码。同步过程不会在日志里打印密码、token、cookie 或完整健康数据。
 
-如果登录失败，CLI 会给出清晰提示：
+## 查看活动列表
 
-- 本地 token 不可用且 `.env` 没有 Garmin 账号变量。
-- Garmin 账号、密码或 MFA 错误。
-- Garmin Connect 或网络连接失败。
+从 SQLite 列出最近活动，方便复制 activity_id：
+
+```bash
+garmin-runner list --limit 20
+garmin-runner list --since 2026-01-01 --limit 20
+```
 
 ## 生成单次训练报告
 
@@ -130,6 +164,26 @@ garmin-runner inspect 123456789
 ```
 
 `inspect` 只输出 SQLite、summary JSON、FIT 文件状态、summary 关键字段、FIT record 数量和字段列表；不会展开完整原始 JSON 或 FIT records。
+
+## 常见错误
+
+MFA：
+首次登录或 Garmin 风控时可能要求 MFA。`doctor`、`sync` 会提示输入验证码，验证码只在本地交互使用，不会写入 Git。
+
+登录失败：
+检查 `.env` 是否存在，或运行 `garmin-runner setup-credentials` 重新写入。CLI 不会打印密码、token 或 cookie。
+
+token 失效：
+删除或备份本地 `data/tokens` 后重新运行 `garmin-runner doctor` 或 `garmin-runner sync`，让 Garmin 重新登录并刷新 token。
+
+数据库不存在：
+先运行 `garmin-runner sync --since YYYY-MM-DD`。`garmin-runner list` 和 `inspect` 会给出中文提示。
+
+FIT 缺失：
+运行 `garmin-runner inspect ACTIVITY_ID` 查看 FIT 路径状态。缺失时可重新同步对应日期范围。
+
+Garmin 字段变化：
+如果 summary 或 FIT 字段变化，`inspect` 会列出当前可用字段和明显缺失字段，便于定位解析问题。
 
 ## 开发
 

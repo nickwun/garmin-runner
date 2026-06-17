@@ -4,6 +4,7 @@ import json
 import os
 import sys
 import tomllib
+import getpass
 from datetime import date, datetime
 from pathlib import Path
 from typing import Annotated
@@ -259,6 +260,66 @@ def inspect(
         typer.echo("FIT 可用字段: N/A")
 
 
+@app.command("setup-credentials")
+def setup_credentials(
+    config: Annotated[
+        Path,
+        typer.Option("--config", help="本地配置文件路径。"),
+    ] = Path("config/athlete.yaml"),
+    email_only: Annotated[
+        bool,
+        typer.Option("--email-only", help="只保存 Garmin email，不保存密码。"),
+    ] = False,
+) -> None:
+    """Safely write local Garmin credentials to .env."""
+    settings = load_settings(config)
+    project_root = _project_root_from_config(config)
+    env_path = project_root / ".env"
+    if not _is_env_ignored(project_root):
+        typer.secho(
+            ".env 尚未被 .gitignore 忽略。请先修正 .gitignore，避免误提交凭证。",
+            fg=typer.colors.RED,
+        )
+        raise typer.Exit(code=1)
+
+    email = typer.prompt("请输入 Garmin email").strip()
+    if not email:
+        typer.secho("Garmin email 不能为空。", fg=typer.colors.RED)
+        raise typer.Exit(code=1)
+
+    password: str | None = None
+    if email_only:
+        typer.echo("密码未保存。你可以用环境变量或稍后手动写入 GARMIN_PASSWORD。")
+    else:
+        password = getpass.getpass("请输入 Garmin password（输入会隐藏）: ")
+        if not password:
+            typer.secho("Garmin password 不能为空。", fg=typer.colors.RED)
+            raise typer.Exit(code=1)
+
+    action = "overwrite"
+    if env_path.exists():
+        action = _prompt_env_action()
+        if action == "keep":
+            typer.echo("保留现有 .env，未写入新凭证。")
+            return
+
+    backup_path = write_credentials_env(
+        env_path=env_path,
+        email_env=settings.garmin.email_env,
+        password_env=settings.garmin.password_env,
+        email=email,
+        password=password,
+        action=action,
+    )
+    if backup_path is not None:
+        typer.echo(f"已备份现有 .env: {backup_path}")
+    typer.echo(".env 已写入本地凭证。不会输出密码，也不会提交到 Git。")
+    if email_only:
+        typer.echo("密码未保存；运行 doctor 前请设置密码环境变量或手动补充 .env。")
+    typer.echo("如果 Garmin 要求 MFA，doctor 或 sync 会提示你输入验证码。")
+    typer.echo("下一步可以运行：garmin-runner doctor")
+
+
 def _prompt_mfa() -> str:
     return typer.prompt("请输入 Garmin MFA 验证码", hide_input=False)
 
@@ -281,6 +342,55 @@ def _project_root_from_config(config: Path) -> Path:
     if config.parent.name == "config":
         return config.parent.parent
     return Path.cwd()
+
+
+def _is_env_ignored(project_root: Path) -> bool:
+    gitignore = project_root / ".gitignore"
+    if not gitignore.exists():
+        return False
+    patterns = [
+        line.strip()
+        for line in gitignore.read_text(encoding="utf-8").splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    ]
+    return ".env" in patterns or "/.env" in patterns
+
+
+def _prompt_env_action() -> str:
+    typer.echo(".env 已存在，请选择处理方式：")
+    typer.echo("- overwrite")
+    typer.echo("- keep")
+    typer.echo("- backup and overwrite")
+    while True:
+        action = typer.prompt("请输入选择").strip().lower()
+        if action in {"overwrite", "keep", "backup and overwrite"}:
+            return action
+        typer.echo("无效选择，请输入 overwrite、keep 或 backup and overwrite。")
+
+
+def write_credentials_env(
+    env_path: Path,
+    email_env: str,
+    password_env: str,
+    email: str,
+    password: str | None,
+    action: str,
+) -> Path | None:
+    env_path.parent.mkdir(parents=True, exist_ok=True)
+    backup_path = None
+    if env_path.exists() and action == "backup and overwrite":
+        backup_path = env_path.with_name(
+            f".env.backup-{datetime.now().strftime('%Y%m%d%H%M%S')}"
+        )
+        backup_path.write_text(env_path.read_text(encoding="utf-8"), encoding="utf-8")
+    lines = [
+        "# Local Garmin credentials. Do not commit this file.",
+        f"{email_env}={email}",
+    ]
+    if password is not None:
+        lines.append(f"{password_env}={password}")
+    env_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return backup_path
 
 
 def _python_version_ok() -> bool:
