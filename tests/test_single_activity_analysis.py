@@ -266,11 +266,53 @@ def test_heart_rate_drift_is_not_applicable_for_interval_workouts() -> None:
         _training_config_from_image(),
     )
 
-    assert analysis.training_type == "阈值课"
+    assert analysis.training_type == "阈值间歇"
     assert analysis.heart_rate_drift.applicable is False
     assert analysis.heart_rate_drift.drift_pct is None
     assert "不适用" in analysis.heart_rate_drift.label
     assert any("心率漂移" in note for note in analysis.not_applicable_notes)
+
+
+def test_short_standalone_aerobic_record_is_warmup_or_cooldown() -> None:
+    summary = {
+        "activityId": "602516586",
+        "activityName": "福州市 跑步",
+        "startTimeLocal": "2026-06-05T06:39:17",
+        "distance": 4510.76,
+        "duration": 1578.1,
+        "averageHR": 152,
+        "maxHR": 165,
+    }
+
+    analysis = analyze_activity(
+        summary,
+        _steady_points(distance_m=4510.76, duration_s=1578.1, heart_rate=152),
+        _training_config_from_image(),
+    )
+
+    assert analysis.training_type == "热身/冷身"
+    assert "热身或冷身" in analysis.guidance.prohibited
+
+
+def test_two_kilometer_repeats_are_threshold_intervals() -> None:
+    summary = {
+        "activityId": "606648954",
+        "activityName": "福州市 - 5×2 公里",
+        "startTimeLocal": "2026-06-16T05:44:56",
+        "distance": 17431.64,
+        "duration": 5220.863,
+        "averageHR": 147,
+        "maxHR": 175,
+    }
+
+    analysis = analyze_activity(
+        summary,
+        _steady_points(distance_m=17431.64, duration_s=5220.863, heart_rate=147),
+        _training_config_from_image(),
+    )
+
+    assert analysis.training_type == "阈值间歇"
+    assert analysis.heart_rate_drift.applicable is False
 
 
 def test_missing_fit_fields_lower_analysis_confidence() -> None:

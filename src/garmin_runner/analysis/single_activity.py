@@ -302,6 +302,8 @@ def _classify_training(
 
     if any(keyword in name for keyword in ("race", "比赛", "半马", "马拉松", "10k", "5k")):
         return "比赛"
+    if _looks_like_threshold_interval(name):
+        return "阈值间歇"
     if (
         (pct["vo2"] + pct["sprint"] >= 0.20 and (pace_stability.cv_pct or 0) > 10)
         or "interval" in name
@@ -319,6 +321,8 @@ def _classify_training(
     if hard_pct >= 0.30:
         return "阈值课"
     if avg_hr is not None:
+        if _looks_like_warmup_or_cooldown(name, distance, duration):
+            return "热身/冷身"
         if planned_easy and avg_hr > config.heart_rate_zones.aerobic_high:
             if avg_hr <= config.heart_rate_zones.steady_high:
                 return "轻松跑跑成稳态"
@@ -388,7 +392,7 @@ def _score_execution(
             score -= min(15.0, max(0.0, drift.drift_pct - 7) * 2.0)
         if pace_stability.cv_pct is not None:
             score -= min(10.0, max(0.0, pace_stability.cv_pct - 15) * 0.8)
-    elif training_type in {"阈值课", "间歇课"}:
+    elif training_type in {"阈值课", "间歇课", "阈值间歇"}:
         target_pct = pct["steady"] + pct["mp_bridge"] + pct["threshold"]
         easyish_pct = pct["below_range"] + pct["very_easy"] + pct["easy"]
         score -= max(0.0, 0.65 - target_pct) * 45
@@ -405,7 +409,7 @@ def _score_execution(
         if drift.applicable and drift.drift_pct is not None:
             score -= min(15.0, max(0.0, drift.drift_pct - 7) * 2.0)
 
-    if training_type in {"阈值课", "间歇课"} and pct.get("below_range", 0) > 0.30:
+    if training_type in {"阈值课", "间歇课", "阈值间歇"} and pct.get("below_range", 0) > 0.30:
         score -= (pct.get("below_range", 0) - 0.30) * 20
     if confidence.level == "low":
         score -= 5
@@ -448,11 +452,15 @@ def _training_guidance(
         tomorrow = "改为恢复日或完全休息，把心率重新压回恢复区间。"
         future = "未来 48-72 小时避免连续质量刺激，等主观疲劳下降后再恢复结构化训练。"
         prohibited = "不要把原计划轻松跑继续跑成稳态或阈值。"
+    elif training_type == "热身/冷身":
+        tomorrow = "按主课或整体训练负荷安排恢复；单独这段只作为热身/冷身记录解读。"
+        future = "未来 48-72 小时参考当天完整训练组合，不用单独放大这条短记录。"
+        prohibited = "不要把热身或冷身当作独立有氧课评分，也不要用它推断当天主训练质量。"
     elif training_type in {"中长有氧 / 稍稳有氧", "稳态跑", "马配桥梁"}:
         tomorrow = "安排轻松跑或休息，观察腿部和晨起心率。"
         future = "48-72 小时内可做一次短有氧或技术跑，质量课视恢复情况再定。"
         prohibited = "不要连续两天把有氧跑进阈值以上。"
-    elif training_type in {"阈值课", "间歇课"}:
+    elif training_type in {"阈值课", "间歇课", "阈值间歇"}:
         tomorrow = "安排恢复跑或休息，不再叠加强度。"
         future = "未来 48-72 小时以恢复和低强度有氧为主，下一次质量课至少隔一天。"
         prohibited = "不要用全程平均配速评价间歇质量，不要补跑额外强度。"
@@ -645,13 +653,30 @@ def _drift_not_applicable(
     name = (summary.get("activityName") or "").lower()
     if _name_has_any(name, ("interval", "间歇", "4×", "5×", "4x", "5x")):
         return True
-    if training_type in {"比赛", "间歇课"}:
+    if training_type in {"比赛", "间歇课", "阈值间歇"}:
         return True
     return bool(pace_stability.cv_pct is not None and pace_stability.cv_pct > 25)
 
 
 def _name_has_any(name: str, keywords: tuple[str, ...]) -> bool:
     return any(keyword in name for keyword in keywords)
+
+
+def _looks_like_threshold_interval(name: str) -> bool:
+    compact = name.replace(" ", "")
+    if any(pattern in compact for pattern in ("×2公里", "x2公里", "x2km")):
+        return True
+    return "2公里" in compact and _name_has_any(
+        name, ("interval", "repeats", "间歇")
+    )
+
+
+def _looks_like_warmup_or_cooldown(name: str, distance_km: float, duration_s: float) -> bool:
+    if _name_has_any(name, ("warm", "cool", "热身", "冷身", "放松")):
+        return True
+    if _name_has_any(name, ("tempo", "threshold", "阈值", "间歇", "interval")):
+        return False
+    return distance_km <= 5.0 and duration_s <= 35 * 60
 
 
 def _segment_distance(previous: TimeSeriesPoint, current: TimeSeriesPoint) -> float:
