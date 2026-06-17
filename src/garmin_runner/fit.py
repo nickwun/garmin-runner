@@ -69,6 +69,11 @@ def extract_time_series(messages: dict[str, list[dict[str, Any]]]) -> list[TimeS
     return points
 
 
+def record_messages(messages: dict[str, list[dict[str, Any]]]) -> list[dict[str, Any]]:
+    records = messages.get("record_mesgs") or messages.get("record") or []
+    return records if isinstance(records, list) else []
+
+
 def _elapsed_seconds(record: dict[str, Any], timestamp: Any, first_timestamp: Any) -> float:
     timer_time = _number(record.get("timer_time") or record.get("elapsed_time"))
     if timer_time is not None:

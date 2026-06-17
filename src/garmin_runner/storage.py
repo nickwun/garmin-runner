@@ -113,6 +113,22 @@ class ActivityStore:
             ).fetchall()
         return [dict(row) for row in rows]
 
+    def list_recent_activities(
+        self,
+        limit: int = 20,
+        since: str | None = None,
+    ) -> list[dict[str, Any]]:
+        query = "SELECT * FROM activities"
+        params: list[Any] = []
+        if since is not None:
+            query += " WHERE start_time_local >= ?"
+            params.append(since)
+        query += " ORDER BY start_time_local DESC, activity_id DESC LIMIT ?"
+        params.append(limit)
+        with self._connect() as conn:
+            rows = conn.execute(query, params).fetchall()
+        return [dict(row) for row in rows]
+
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row

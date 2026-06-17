@@ -102,6 +102,35 @@ reports/daily/YYYY-MM-DD_<activity_id>.md
 
 第一版教练指令来自规则引擎，不调用 LLM。
 
+## 真实数据验收
+
+检查本地环境、配置、目录、SQLite 和 Garmin 登录状态：
+
+```bash
+garmin-runner doctor
+```
+
+离线只看本地检查：
+
+```bash
+garmin-runner doctor --skip-login
+```
+
+从 SQLite 列出最近活动，方便复制 activity_id：
+
+```bash
+garmin-runner list --limit 20
+garmin-runner list --since 2026-01-01 --limit 20
+```
+
+检查某条活动的本地数据完整性：
+
+```bash
+garmin-runner inspect 123456789
+```
+
+`inspect` 只输出 SQLite、summary JSON、FIT 文件状态、summary 关键字段、FIT record 数量和字段列表；不会展开完整原始 JSON 或 FIT records。
+
 ## 开发
 
 运行测试：
