@@ -1,0 +1,153 @@
+from __future__ import annotations
+
+from datetime import datetime, timedelta
+from pathlib import Path
+
+from garmin_runner.analysis.single_activity import (
+    HeartRateZones,
+    TimeSeriesPoint,
+    TrainingConfig,
+    analyze_activity,
+)
+from garmin_runner.reporting.daily import write_daily_report
+
+
+def test_analyze_activity_calculates_basic_metrics_zones_and_drift() -> None:
+    summary = {
+        "activityId": "12345",
+        "activityName": "MAF Run",
+        "startTimeLocal": "2026-06-01T06:30:00",
+        "distance": 5000.0,
+        "duration": 1800.0,
+        "averageHR": 142,
+        "maxHR": 172,
+        "elevationGain": 38,
+        "averageRunningCadenceInStepsPerMinute": 176,
+    }
+    points = _points(
+        [
+            (0, 0, 119, 3.0),
+            (60, 180, 130, 3.0),
+            (120, 360, 142, 3.0),
+            (180, 540, 150, 3.0),
+            (240, 720, 160, 3.0),
+            (300, 900, 172, 3.0),
+            (360, 1080, 172, 3.0),
+        ]
+    )
+    config = TrainingConfig(
+        heart_rate_zones=HeartRateZones(
+            maf_low=120,
+            maf_high=145,
+            steady_high=155,
+            threshold_high=170,
+        )
+    )
+
+    analysis = analyze_activity(summary, points, config)
+
+    assert analysis.basic.distance_km == 5.0
+    assert analysis.basic.duration_s == 1800.0
+    assert analysis.basic.average_pace_s_per_km == 360.0
+    assert analysis.basic.average_hr == 142
+    assert analysis.basic.max_hr == 172
+    assert analysis.basic.elevation_gain_m == 38
+    assert analysis.basic.average_cadence_spm == 176
+    assert analysis.hr_zones.seconds_by_zone == {
+        "below_maf": 60.0,
+        "maf": 120.0,
+        "steady": 60.0,
+        "threshold": 60.0,
+        "above_threshold": 60.0,
+    }
+    assert analysis.pace_stability.cv_pct == 0.0
+    assert analysis.heart_rate_drift.drift_pct > 0
+
+
+def test_analyze_activity_classifies_threshold_workout_and_scores_execution() -> None:
+    summary = {
+        "activityId": "67890",
+        "activityName": "Threshold repeats",
+        "startTimeLocal": "2026-06-02T06:30:00",
+        "distance": 8000.0,
+        "duration": 2400.0,
+        "averageHR": 158,
+        "maxHR": 176,
+    }
+    points = _points(
+        [
+            (0, 0, 135, 3.2),
+            (300, 960, 164, 3.8),
+            (600, 2100, 166, 3.8),
+            (900, 3240, 150, 3.1),
+            (1200, 4170, 168, 3.8),
+            (1500, 5310, 176, 3.8),
+            (1800, 6450, 145, 3.0),
+            (2100, 7350, 138, 3.0),
+            (2400, 8250, 138, 3.0),
+        ]
+    )
+    config = TrainingConfig(
+        heart_rate_zones=HeartRateZones(
+            maf_low=120,
+            maf_high=145,
+            steady_high=155,
+            threshold_high=170,
+        )
+    )
+
+    analysis = analyze_activity(summary, points, config)
+
+    assert analysis.training_type == "阈值课"
+    assert 0 <= analysis.execution_score <= 100
+    assert analysis.execution_score < 90
+    assert analysis.coach_instruction
+
+
+def test_daily_report_uses_required_path_and_sections(tmp_path: Path) -> None:
+    summary = {
+        "activityId": "12345",
+        "activityName": "Recovery Run",
+        "startTimeLocal": "2026-06-01T06:30:00",
+        "distance": 3000.0,
+        "duration": 1200.0,
+        "averageHR": 118,
+        "maxHR": 132,
+    }
+    analysis = analyze_activity(
+        summary,
+        _points([(0, 0, 116, 2.5), (600, 1500, 118, 2.5), (1200, 3000, 120, 2.5)]),
+        TrainingConfig(
+            heart_rate_zones=HeartRateZones(
+                maf_low=120,
+                maf_high=145,
+                steady_high=155,
+                threshold_high=170,
+            )
+        ),
+    )
+
+    report_path = write_daily_report(analysis, tmp_path)
+
+    assert report_path == tmp_path / "daily" / "2026-06-01_12345.md"
+    content = report_path.read_text(encoding="utf-8")
+    assert "## 数据面" in content
+    assert "## 生理面" in content
+    assert "## 执行打分" in content
+    assert "## 教练指令" in content
+
+
+def _points(rows: list[tuple[int, float, int, float]]) -> list[TimeSeriesPoint]:
+    start = datetime(2026, 6, 1, 6, 30, 0)
+    return [
+        TimeSeriesPoint(
+            timestamp=start + timedelta(seconds=offset_s),
+            elapsed_s=float(offset_s),
+            distance_m=distance_m,
+            heart_rate_bpm=heart_rate,
+            speed_mps=speed_mps,
+            cadence_spm=None,
+            altitude_m=None,
+        )
+        for offset_s, distance_m, heart_rate, speed_mps in rows
+    ]

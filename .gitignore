@@ -1,0 +1,24 @@
+.DS_Store
+.env
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+
+# Local Garmin credentials, tokens, raw health data, and databases.
+config/athlete.yaml
+data/
+reports/
+*.sqlite
+*.sqlite3
+*.db
+*.fit
+*.tcx
+*.gpx
+*.cookie
+*.cookies
+*.token
+*.tokens
+.garminconnect/
+garminconnect_tokens/

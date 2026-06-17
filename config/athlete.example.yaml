@@ -1,0 +1,29 @@
+# Copy this file to config/athlete.yaml and keep the copy out of Git.
+athlete:
+  name: "Your Name"
+  timezone: "Asia/Shanghai"
+
+garmin:
+  # Prefer environment variables in .env:
+  # GARMIN_EMAIL=you@example.com
+  # GARMIN_PASSWORD=your-password
+  email_env: "GARMIN_EMAIL"
+  password_env: "GARMIN_PASSWORD"
+  token_store: "data/tokens"
+
+storage:
+  data_dir: "data"
+  database_path: "data/garmin-runner.sqlite"
+  summary_dir: "data/raw/summary"
+  fit_dir: "data/raw/fit"
+  reports_dir: "reports"
+
+training:
+  # 按你的个人情况填写。第一版规则引擎只使用这些确定性区间，不调用 LLM。
+  heart_rate_zones:
+    maf_low: 120
+    maf_high: 145
+    steady_high: 155
+    threshold_high: 170
+  long_run_min_distance_km: 18
+  long_run_min_duration_min: 90

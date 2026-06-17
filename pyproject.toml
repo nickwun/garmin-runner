@@ -1,0 +1,38 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "garmin-runner"
+version = "0.1.0"
+description = "Local-first Garmin running data sync and training analysis toolkit."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+authors = [{ name = "garmin-runner contributors" }]
+dependencies = [
+  "garminconnect>=0.2.28",
+  "garmin-fit-sdk>=21.158.0",
+  "python-dotenv>=1.0.1",
+  "pyyaml>=6.0.2",
+  "typer>=0.12.5",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.3.0",
+]
+
+[project.urls]
+Repository = "https://github.com/nickwun/garmin-runner"
+Issues = "https://github.com/nickwun/garmin-runner/issues"
+
+[project.scripts]
+garmin-runner = "garmin_runner.cli:app"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/garmin_runner"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
