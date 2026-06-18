@@ -125,7 +125,7 @@ def analyze(
         typer.secho(f"分析失败：{exc}", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=1) from exc
 
-    typer.echo(f"报告已生成：{report_path}")
+    _echo_report_link("报告已生成", report_path)
 
 
 @report_app.command("weekly")
@@ -190,7 +190,7 @@ def weekly_report(
         typer.secho(f"周报生成失败：{exc}", fg=typer.colors.RED)
         raise typer.Exit(code=1) from exc
 
-    typer.echo(f"周报已生成：{report_path}")
+    _echo_report_link("周报已生成", report_path)
 
 
 @report_app.command("monthly")
@@ -234,7 +234,7 @@ def monthly_report(
         typer.secho(f"月报生成失败：{exc}", fg=typer.colors.RED)
         raise typer.Exit(code=1) from exc
 
-    typer.echo(f"月报已生成：{report_path}")
+    _echo_report_link("月报已生成", report_path)
 
 
 @coach_app.command("daily")
@@ -265,8 +265,8 @@ def coach_daily(
     except Exception as exc:
         typer.secho(f"教练总结失败：{exc}", fg=typer.colors.RED)
         raise typer.Exit(code=1) from exc
-    typer.echo(f"教练总结已生成：{result.output_path}")
-    typer.echo(f"Prompt 已保存：{result.prompt_path}")
+    _echo_report_link("教练总结已生成", result.output_path)
+    _echo_report_link("Prompt 已保存", result.prompt_path, link_label="Prompt 快捷链接")
 
 
 @coach_app.command("weekly")
@@ -301,8 +301,8 @@ def coach_weekly(
     except Exception as exc:
         typer.secho(f"教练总结失败：{exc}", fg=typer.colors.RED)
         raise typer.Exit(code=1) from exc
-    typer.echo(f"教练总结已生成：{result.output_path}")
-    typer.echo(f"Prompt 已保存：{result.prompt_path}")
+    _echo_report_link("教练总结已生成", result.output_path)
+    _echo_report_link("Prompt 已保存", result.prompt_path, link_label="Prompt 快捷链接")
 
 
 @coach_app.command("monthly")
@@ -337,8 +337,8 @@ def coach_monthly(
     except Exception as exc:
         typer.secho(f"教练总结失败：{exc}", fg=typer.colors.RED)
         raise typer.Exit(code=1) from exc
-    typer.echo(f"教练总结已生成：{result.output_path}")
-    typer.echo(f"Prompt 已保存：{result.prompt_path}")
+    _echo_report_link("教练总结已生成", result.output_path)
+    _echo_report_link("Prompt 已保存", result.prompt_path, link_label="Prompt 快捷链接")
 
 
 @app.command()
@@ -561,6 +561,21 @@ def setup_credentials(
 
 def _prompt_mfa() -> str:
     return typer.prompt("请输入 Garmin MFA 验证码", hide_input=False)
+
+
+def _echo_report_link(
+    message: str,
+    path: Path,
+    link_label: str = "报告快捷链接",
+) -> None:
+    typer.echo(f"{message}：{path}")
+    typer.echo(f"{link_label}：{_absolute_display_path(path)}")
+
+
+def _absolute_display_path(path: Path) -> Path:
+    if path.is_absolute():
+        return path
+    return Path.cwd() / path
 
 
 def _parse_date(value: str) -> date:
