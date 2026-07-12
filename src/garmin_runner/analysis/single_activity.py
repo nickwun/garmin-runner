@@ -293,8 +293,8 @@ def _heart_rate_drift(
     if len(points) < 3:
         return HeartRateDrift(None, None, None, "数据不足")
     midpoint = points[0].elapsed_s + (points[-1].elapsed_s - points[0].elapsed_s) / 2
-    first = _pace_hr_ratio(points, upper_elapsed_s=midpoint)
-    second = _pace_hr_ratio(points, lower_elapsed_s=midpoint)
+    first = _speed_hr_ratio(points, upper_elapsed_s=midpoint)
+    second = _speed_hr_ratio(points, lower_elapsed_s=midpoint)
     if first is None or second is None or first == 0:
         return HeartRateDrift(first, second, None, "数据不足")
     drift = (first - second) / first * 100
@@ -786,12 +786,12 @@ def _phase(name: str, chunks: list[_Chunk]) -> WorkoutPhase:
     )
 
 
-def _pace_hr_ratio(
+def _speed_hr_ratio(
     points: list[TimeSeriesPoint],
     lower_elapsed_s: float | None = None,
     upper_elapsed_s: float | None = None,
 ) -> float | None:
-    paces: list[float] = []
+    speeds: list[float] = []
     hrs: list[float] = []
     for previous, current, duration, distance in _valid_segments(points):
         midpoint = previous.elapsed_s + (current.elapsed_s - previous.elapsed_s) / 2
@@ -801,12 +801,12 @@ def _pace_hr_ratio(
             continue
         if duration <= 0 or distance <= 0 or previous.heart_rate_bpm is None:
             continue
-        paces.append(duration / (distance / 1000))
+        speeds.append(distance / duration)
         hrs.append(previous.heart_rate_bpm)
-    if not paces or not hrs:
+    if not speeds or not hrs:
         return None
     avg_hr = statistics.fmean(hrs)
-    return statistics.fmean(paces) / avg_hr if avg_hr else None
+    return statistics.fmean(speeds) / avg_hr if avg_hr else None
 
 
 def _late_slowdown(points: list[TimeSeriesPoint]) -> float | None:

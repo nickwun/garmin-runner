@@ -75,6 +75,32 @@ def test_analyze_activity_calculates_basic_metrics_zones_and_drift() -> None:
     assert analysis.heart_rate_drift.drift_pct > 0
 
 
+def test_heart_rate_drift_does_not_penalize_controlled_progression() -> None:
+    summary = {
+        "activityId": "controlled-progression",
+        "activityName": "福州市 跑步",
+        "startTimeLocal": "2026-07-11T06:01:20",
+        "distance": 3480.0,
+        "duration": 1200.0,
+        "averageHR": 124,
+        "maxHR": 130,
+    }
+    points = _points(
+        [
+            # The runner speeds up by 7.1% while heart rate increases proportionally.
+            (0, 0, 120, 2.8),
+            (600, 1680, 129, 3.0),
+            (1200, 3480, 129, 3.0),
+        ]
+    )
+
+    analysis = analyze_activity(summary, points, _training_config_from_image())
+
+    assert analysis.heart_rate_drift.label == "稳定"
+    assert analysis.heart_rate_drift.drift_pct is not None
+    assert abs(analysis.heart_rate_drift.drift_pct) < 1
+
+
 def test_analyze_activity_classifies_threshold_workout_and_scores_execution() -> None:
     summary = {
         "activityId": "67890",
