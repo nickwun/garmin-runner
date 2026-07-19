@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 
@@ -25,6 +25,13 @@ class WeeklyTrainingStructure:
 
 
 @dataclass(frozen=True)
+class WeeklyWorkoutPhase:
+    name: str
+    distance_km: float
+    duration_s: float
+
+
+@dataclass(frozen=True)
 class WeeklyActivity:
     activity_id: str
     activity_date: date
@@ -37,6 +44,8 @@ class WeeklyActivity:
     report_path: Path
     intensity_distance_km: float | None = None
     intensity_duration_s: float | None = None
+    start_time_local: datetime | None = None
+    workout_phases: tuple[WeeklyWorkoutPhase, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -53,6 +62,25 @@ class WeeklyContext:
 class IntensityBucket:
     distance_km: float
     duration_s: float
+
+
+@dataclass(frozen=True)
+class DailyCompositionItem:
+    label: str
+    distance_km: float
+
+
+@dataclass(frozen=True)
+class DailyTrainingSummary:
+    activity_date: date
+    training_type: str
+    composition: tuple[DailyCompositionItem, ...]
+    activities: tuple[WeeklyActivity, ...]
+    total_distance_km: float
+    total_duration_s: float
+    combined_pace_s_per_km: float | None
+    average_hr: float | None
+    is_rest_day: bool
 
 
 @dataclass(frozen=True)
@@ -94,6 +122,7 @@ class WeeklyAnalysis:
     auxiliary: IntensityBucket
     high_intensity_count: int
     high_intensity_time_ratio: float
+    daily_summaries: list[DailyTrainingSummary]
     key_workouts: list[KeyWorkout]
     risk_signals: list[str]
     next_week: NextWeekAdvice
@@ -106,7 +135,8 @@ def analyze_week(context: WeeklyContext) -> WeeklyAnalysis:
     total_distance = round(sum(item.distance_km for item in activities), 2)
     total_duration = sum(item.duration_s for item in activities)
     running_days = len({item.activity_date for item in activities})
-    rest_days = max(0, 7 - running_days)
+    period_days = max(0, (context.week_end - context.week_start).days + 1)
+    rest_days = max(0, period_days - running_days)
     longest = max((item.distance_km for item in activities), default=0.0)
 
     easy = _bucket(activities, EASY_TYPES)
@@ -162,12 +192,169 @@ def analyze_week(context: WeeklyContext) -> WeeklyAnalysis:
         auxiliary=auxiliary,
         high_intensity_count=high_count,
         high_intensity_time_ratio=round(high_ratio, 3),
+        daily_summaries=_daily_summaries(context),
         key_workouts=_key_workouts(activities),
         risk_signals=risks,
         next_week=next_week,
         prohibited=prohibited,
         structure=context.structure,
     )
+
+
+def _daily_summaries(context: WeeklyContext) -> list[DailyTrainingSummary]:
+    activities_by_date: dict[date, list[WeeklyActivity]] = {}
+    for activity in context.activities:
+        activities_by_date.setdefault(activity.activity_date, []).append(activity)
+
+    summaries: list[DailyTrainingSummary] = []
+    current_date = context.week_start
+    while current_date <= context.week_end:
+        activities = tuple(
+            sorted(activities_by_date.get(current_date, []), key=_activity_order_key)
+        )
+        if not activities:
+            summaries.append(
+                DailyTrainingSummary(
+                    activity_date=current_date,
+                    training_type="休息",
+                    composition=(),
+                    activities=(),
+                    total_distance_km=0.0,
+                    total_duration_s=0.0,
+                    combined_pace_s_per_km=None,
+                    average_hr=None,
+                    is_rest_day=True,
+                )
+            )
+            current_date += timedelta(days=1)
+            continue
+
+        total_distance = round(sum(item.distance_km for item in activities), 2)
+        total_duration = sum(item.duration_s for item in activities)
+        hr_activities = [item for item in activities if item.average_hr is not None]
+        hr_duration = sum(item.duration_s for item in hr_activities)
+        average_hr = (
+            sum(item.average_hr * item.duration_s for item in hr_activities) / hr_duration
+            if hr_duration
+            else None
+        )
+        dominant = _dominant_activity(activities)
+        training_type = dominant.training_type
+        if training_type != "热身/冷身" and _has_warmup_or_cooldown(activities):
+            training_type = f"{training_type}（含热身冷身）"
+        summaries.append(
+            DailyTrainingSummary(
+                activity_date=current_date,
+                training_type=training_type,
+                composition=_composition_items(activities),
+                activities=activities,
+                total_distance_km=total_distance,
+                total_duration_s=total_duration,
+                combined_pace_s_per_km=(
+                    total_duration / total_distance
+                    if total_distance > 0 and total_duration > 0
+                    else None
+                ),
+                average_hr=average_hr,
+                is_rest_day=False,
+            )
+        )
+        current_date += timedelta(days=1)
+    return summaries
+
+
+def _activity_order_key(activity: WeeklyActivity) -> tuple[bool, datetime, str]:
+    return (
+        activity.start_time_local is None,
+        activity.start_time_local or datetime.max,
+        activity.activity_id,
+    )
+
+
+def _dominant_activity(activities: tuple[WeeklyActivity, ...]) -> WeeklyActivity:
+    return min(
+        activities,
+        key=lambda item: (
+            -_training_priority(item.training_type),
+            -item.duration_s,
+            *_activity_order_key(item),
+        ),
+    )
+
+
+def _composition_items(
+    activities: tuple[WeeklyActivity, ...],
+) -> tuple[DailyCompositionItem, ...]:
+    main_span = _main_activity_span(activities)
+    composition: list[DailyCompositionItem] = []
+    for index, activity in enumerate(activities):
+        if activity.workout_phases:
+            composition.extend(
+                DailyCompositionItem(phase.name, phase.distance_km)
+                for phase in activity.workout_phases
+            )
+            continue
+        label = activity.training_type
+        if label == "热身/冷身" and main_span is not None:
+            label = _auxiliary_label(index, main_span)
+        composition.append(DailyCompositionItem(label, activity.distance_km))
+    return tuple(composition)
+
+
+def _main_activity_span(
+    activities: tuple[WeeklyActivity, ...],
+) -> tuple[int, int] | None:
+    non_auxiliary = [
+        (index, activity)
+        for index, activity in enumerate(activities)
+        if activity.training_type != "热身/冷身"
+    ]
+    if not non_auxiliary:
+        return None
+    highest_priority = max(
+        _training_priority(activity.training_type) for _, activity in non_auxiliary
+    )
+    main_indices = [
+        index
+        for index, activity in non_auxiliary
+        if _training_priority(activity.training_type) == highest_priority
+    ]
+    return min(main_indices), max(main_indices)
+
+
+def _auxiliary_label(index: int, main_span: tuple[int, int]) -> str:
+    first_main, last_main = main_span
+    if index < first_main:
+        return "热身"
+    if index > last_main:
+        return "冷身"
+    return "辅助跑"
+
+
+def _has_warmup_or_cooldown(activities: tuple[WeeklyActivity, ...]) -> bool:
+    return any(
+        activity.training_type == "热身/冷身"
+        or any(phase.name in {"热身", "冷身"} for phase in activity.workout_phases)
+        for activity in activities
+    )
+
+
+def _training_priority(training_type: str) -> int:
+    if training_type == "比赛":
+        return 7
+    if training_type in LONG_RUN_TYPES:
+        return 6
+    if training_type in HIGH_INTENSITY_TYPES:
+        return 5
+    if training_type in STEADY_TYPES:
+        return 4
+    if training_type in {"MAF 跑", "E 跑"}:
+        return 3
+    if training_type == "恢复跑":
+        return 2
+    if training_type == "热身/冷身":
+        return 1
+    return 0
 
 
 def _bucket(
