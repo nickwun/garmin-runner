@@ -78,6 +78,17 @@ def test_weekly_activity_conversion_preserves_start_time_and_non_overlapping_pha
     assert converted.intensity_duration_s == 2400.0
 
 
+def test_weekly_workout_phase_conversion_omits_non_finite_zero_and_missing_values() -> None:
+    breakdown = WorkoutBreakdown(
+        warmup=WorkoutPhase("热身", float("nan"), 1200.0, None),
+        main=WorkoutPhase("主训练", 0.0, 2400.0, None),
+        cooldown=WorkoutPhase("冷身", 4.0, None, None),  # type: ignore[arg-type]
+        quality=WorkoutPhase("重叠质量段", 6.0, 1800.0, None),
+    )
+
+    assert cli._weekly_workout_phases(breakdown) == ()
+
+
 def test_weekly_analysis_builds_seven_daily_summaries() -> None:
     analysis = analyze_week(
         WeeklyContext(

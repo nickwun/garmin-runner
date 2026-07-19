@@ -6,6 +6,7 @@ import sys
 import tomllib
 import getpass
 from datetime import date, datetime, timedelta
+from math import isfinite
 from pathlib import Path
 from typing import Annotated
 
@@ -763,7 +764,12 @@ def _weekly_workout_phases(workout_breakdown: object | None) -> tuple[WeeklyWork
     for role, phase in phases:
         distance_km = phase.distance_km or 0.0
         duration_s = phase.duration_s or 0.0
-        if distance_km <= 0 or duration_s <= 0:
+        if not (
+            isfinite(distance_km)
+            and distance_km > 0
+            and isfinite(duration_s)
+            and duration_s > 0
+        ):
             continue
         converted.append(
             WeeklyWorkoutPhase(
