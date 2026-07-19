@@ -2,7 +2,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from garmin_runner.analysis.weekly import WeeklyAnalysis
+from garmin_runner.analysis.weekly import DailyTrainingSummary, WeeklyAnalysis
+
+
+_CHINESE_WEEKDAYS = ("周一", "周二", "周三", "周四", "周五", "周六", "周日")
 
 
 def write_weekly_report(analysis: WeeklyAnalysis, reports_dir: Path) -> Path:
@@ -25,6 +28,7 @@ def render_weekly_report(analysis: WeeklyAnalysis) -> str:
     ) or "- 无关键训练"
     risks = "\n".join(f"- {signal}" for signal in analysis.risk_signals)
     prohibited = "\n".join(f"- {item}" for item in analysis.prohibited)
+    daily_details = _render_daily_details(analysis.daily_summaries)
     return f"""# {analysis.iso_year}-W{analysis.iso_week:02d} 周训练报告
 
 周期：{analysis.week_start.isoformat()} 至 {analysis.week_end.isoformat()}
@@ -45,6 +49,10 @@ def render_weekly_report(analysis: WeeklyAnalysis) -> str:
 - 长距离占周跑量比例：{_format_pct(analysis.long_run_distance_ratio)}
 - 与上周相比：{_format_delta(analysis.previous_week_delta_km, analysis.previous_week_delta_pct)}
 - 与近 4 周均值相比：{_format_delta(analysis.recent_4w_delta_km, analysis.recent_4w_delta_pct)}
+
+## 每日训练明细
+
+{daily_details}
 
 ## 强度结构
 
@@ -76,6 +84,71 @@ def render_weekly_report(analysis: WeeklyAnalysis) -> str:
 
 {prohibited}
 """
+
+
+def _render_daily_details(summaries: list[DailyTrainingSummary]) -> str:
+    rows = [
+        "| 日期 | 训练类型 | 训练组成 | 总距离 | 总时长 | 综合配速 | 加权心率 |",
+        "| --- | --- | --- | ---: | ---: | ---: | ---: |",
+    ]
+    link_lines: list[str] = []
+    for summary in summaries:
+        activity_date = summary.activity_date
+        date_label = (
+            f"{activity_date.isoformat()} {_CHINESE_WEEKDAYS[activity_date.weekday()]}"
+        )
+        if summary.is_rest_day:
+            rows.append(f"| {date_label} | 休息 | - | - | - | - | - |")
+            continue
+        rows.append(
+            "| "
+            + " | ".join(
+                (
+                    date_label,
+                    summary.training_type,
+                    _format_composition(summary),
+                    f"{summary.total_distance_km:.1f} km",
+                    _format_duration(summary.total_duration_s),
+                    _format_pace(summary.combined_pace_s_per_km),
+                    _format_heart_rate(summary.average_hr),
+                )
+            )
+            + " |"
+        )
+        links = "、".join(
+            f"[{activity.training_type} {activity.activity_id}]"
+            f"(../daily/{activity.report_path.name})"
+            for activity in summary.activities
+        )
+        if links:
+            link_lines.append(f"- {activity_date.isoformat()}：{links}")
+
+    if link_lines:
+        return "\n".join(rows) + "\n\n训练报告：\n\n" + "\n".join(link_lines)
+    return "\n".join(rows)
+
+
+def _format_composition(summary: DailyTrainingSummary) -> str:
+    return (
+        " + ".join(
+            f"{item.label} {item.distance_km:.1f}" for item in summary.composition
+        )
+        + " km"
+    )
+
+
+def _format_pace(seconds_per_km: float | None) -> str:
+    if seconds_per_km is None:
+        return "N/A"
+    total_seconds = int(round(seconds_per_km))
+    minutes, seconds = divmod(total_seconds, 60)
+    return f"{minutes}:{seconds:02d} /km"
+
+
+def _format_heart_rate(average_hr: float | None) -> str:
+    if average_hr is None:
+        return "N/A"
+    return f"{average_hr:.0f} bpm"
 
 
 def _format_duration(seconds: float) -> str:

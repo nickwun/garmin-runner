@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -517,6 +518,115 @@ def test_weekly_analysis_dominant_tie_prefers_duration_then_start_time() -> None
     )
 
     assert id_analysis.daily_summaries[1].training_type == "马配桥梁"
+
+
+def test_weekly_report_renders_daily_detail_table_and_rest_rows(tmp_path: Path) -> None:
+    phases = (
+        WeeklyWorkoutPhase(WeeklyWorkoutPhaseRole.WARMUP, "热身", 3, 900),
+        WeeklyWorkoutPhase(WeeklyWorkoutPhaseRole.MAIN, "稳态跑", 7, 2100),
+        WeeklyWorkoutPhase(WeeklyWorkoutPhaseRole.COOLDOWN, "冷身", 5, 1500),
+    )
+    analysis = analyze_week(
+        WeeklyContext(
+            week_start=date(2026, 6, 15),
+            week_end=date(2026, 6, 21),
+            activities=[
+                _activity(
+                    "123",
+                    date(2026, 6, 16),
+                    15,
+                    4500,
+                    "稳态跑",
+                    average_hr=150,
+                    workout_phases=phases,
+                ),
+                _activity("456", date(2026, 6, 18), 10, 3000, "E 跑"),
+            ],
+            previous_week_distance_km=80,
+            recent_4w_avg_distance_km=75,
+            structure=WeeklyTrainingStructure(),
+        )
+    )
+
+    content = write_weekly_report(analysis, tmp_path).read_text(encoding="utf-8")
+    daily_section = content.split("## 每日训练明细", 1)[1].split("## 强度结构", 1)[0]
+
+    assert "## 每日训练明细" in content
+    assert "| 日期 | 训练类型 | 训练组成 | 总距离 | 总时长 | 综合配速 | 加权心率 |" in content
+    assert "稳态跑（含热身冷身）" in content
+    assert "热身 3.0 + 稳态跑 7.0 + 冷身 5.0 km" in content
+    assert "5:00 /km" in content
+    assert "N/A" in content
+    assert "[稳态跑 123](../daily/123.md)" in content
+    assert content.index("## 训练量") < content.index("## 每日训练明细")
+    assert content.index("## 每日训练明细") < content.index("## 强度结构")
+    expected_dates = [
+        (date(2026, 6, 15) + timedelta(days=offset)).isoformat()
+        for offset in range(7)
+    ]
+    assert [
+        line.split("|")[1].strip().split(" ", 1)[0]
+        for line in daily_section.splitlines()
+        if line.startswith("| 2026-")
+    ] == expected_dates
+    for weekday in ("周一", "周二", "周三", "周四", "周五", "周六", "周日"):
+        assert weekday in daily_section
+    rest_rows = [line for line in daily_section.splitlines() if "| 休息 |" in line]
+    assert len(rest_rows) == 5
+    assert all("| - | - | - | - | - |" in line for line in rest_rows)
+
+
+def test_weekly_report_renders_custom_range_dates(tmp_path: Path) -> None:
+    analysis = analyze_week(
+        WeeklyContext(
+            week_start=date(2026, 6, 15),
+            week_end=date(2026, 6, 17),
+            activities=[_activity("123", date(2026, 6, 16), 10, 3000, "E 跑")],
+            previous_week_distance_km=80,
+            recent_4w_avg_distance_km=75,
+            structure=WeeklyTrainingStructure(),
+        )
+    )
+
+    content = write_weekly_report(analysis, tmp_path).read_text(encoding="utf-8")
+    daily_section = content.split("## 每日训练明细", 1)[1].split("## 强度结构", 1)[0]
+    date_rows = [line for line in daily_section.splitlines() if line.startswith("| 2026-")]
+
+    assert len(date_rows) == 3
+    assert "2026-06-15 周一" in date_rows[0]
+    assert "2026-06-16 周二" in date_rows[1]
+    assert "2026-06-17 周三" in date_rows[2]
+    assert "2026-06-18" not in daily_section
+
+
+def test_weekly_report_renders_relative_daily_links_without_private_paths(
+    tmp_path: Path,
+) -> None:
+    private_dir = tmp_path / "private-health-data" / "reports" / "daily"
+    activity = replace(
+        _activity("123", date(2026, 6, 16), 10, 3000, "E 跑"),
+        report_path=private_dir / "2026-06-16_123.md",
+    )
+    analysis = analyze_week(
+        WeeklyContext(
+            week_start=date(2026, 6, 15),
+            week_end=date(2026, 6, 21),
+            activities=[activity],
+            previous_week_distance_km=80,
+            recent_4w_avg_distance_km=75,
+            structure=WeeklyTrainingStructure(),
+        )
+    )
+
+    content = write_weekly_report(analysis, tmp_path / "output").read_text(
+        encoding="utf-8"
+    )
+
+    assert "[E 跑 123](../daily/2026-06-16_123.md)" in content
+    assert str(tmp_path) not in content
+    assert "private-health-data" not in content
+    for private_marker in (".fit", "summary.json", ".sqlite", "token", "cookie"):
+        assert private_marker not in content.lower()
 
 
 def test_weekly_report_calculates_volume_structure_and_risks(tmp_path: Path) -> None:
