@@ -175,6 +175,258 @@ def test_weekly_analysis_groups_same_day_warmup_main_and_cooldown() -> None:
     assert summary.combined_pace_s_per_km == 340
 
 
+def test_weekly_analysis_relabels_adjacent_easy_activity_as_cooldown() -> None:
+    analysis = analyze_week(
+        WeeklyContext(
+            week_start=date(2026, 6, 15),
+            week_end=date(2026, 6, 21),
+            activities=[
+                _activity(
+                    "steady",
+                    date(2026, 6, 16),
+                    7,
+                    2100,
+                    "稳态跑",
+                    start_time_local=datetime(2026, 6, 16, 6, 0),
+                ),
+                _activity(
+                    "easy-cooldown",
+                    date(2026, 6, 16),
+                    3,
+                    1200,
+                    "E 跑",
+                    start_time_local=datetime(2026, 6, 16, 6, 40),
+                ),
+            ],
+            previous_week_distance_km=80,
+            recent_4w_avg_distance_km=75,
+            structure=WeeklyTrainingStructure(),
+        )
+    )
+
+    summary = analysis.daily_summaries[1]
+    assert summary.training_type == "稳态跑"
+    assert [item.label for item in summary.composition] == ["稳态跑", "冷身"]
+
+
+def test_weekly_analysis_keeps_distant_easy_activity_as_easy_run() -> None:
+    analysis = analyze_week(
+        WeeklyContext(
+            week_start=date(2026, 6, 15),
+            week_end=date(2026, 6, 21),
+            activities=[
+                _activity(
+                    "steady",
+                    date(2026, 6, 16),
+                    7,
+                    2100,
+                    "稳态跑",
+                    start_time_local=datetime(2026, 6, 16, 6, 0),
+                ),
+                _activity(
+                    "separate-easy",
+                    date(2026, 6, 16),
+                    3,
+                    1200,
+                    "E 跑",
+                    start_time_local=datetime(2026, 6, 16, 6, 46),
+                ),
+            ],
+            previous_week_distance_km=80,
+            recent_4w_avg_distance_km=75,
+            structure=WeeklyTrainingStructure(),
+        )
+    )
+
+    assert [item.label for item in analysis.daily_summaries[1].composition] == [
+        "稳态跑",
+        "E 跑",
+    ]
+
+
+def test_weekly_analysis_keeps_easy_activity_with_missing_timestamp_as_easy_run() -> None:
+    analysis = analyze_week(
+        WeeklyContext(
+            week_start=date(2026, 6, 15),
+            week_end=date(2026, 6, 21),
+            activities=[
+                _activity(
+                    "steady",
+                    date(2026, 6, 16),
+                    7,
+                    2100,
+                    "稳态跑",
+                    start_time_local=datetime(2026, 6, 16, 6, 0),
+                ),
+                _activity(
+                    "untimed-easy",
+                    date(2026, 6, 16),
+                    3,
+                    1200,
+                    "E 跑",
+                ),
+            ],
+            previous_week_distance_km=80,
+            recent_4w_avg_distance_km=75,
+            structure=WeeklyTrainingStructure(),
+        )
+    )
+
+    assert [item.label for item in analysis.daily_summaries[1].composition] == [
+        "稳态跑",
+        "E 跑",
+    ]
+
+
+def test_weekly_analysis_relabels_adjacent_easy_activity_as_warmup() -> None:
+    analysis = analyze_week(
+        WeeklyContext(
+            week_start=date(2026, 6, 15),
+            week_end=date(2026, 6, 21),
+            activities=[
+                _activity(
+                    "easy-warmup",
+                    date(2026, 6, 16),
+                    3,
+                    1500,
+                    "E 跑",
+                    start_time_local=datetime(2026, 6, 16, 5, 30),
+                ),
+                _activity(
+                    "steady",
+                    date(2026, 6, 16),
+                    7,
+                    2100,
+                    "稳态跑",
+                    start_time_local=datetime(2026, 6, 16, 6, 0),
+                ),
+            ],
+            previous_week_distance_km=80,
+            recent_4w_avg_distance_km=75,
+            structure=WeeklyTrainingStructure(),
+        )
+    )
+
+    assert [item.label for item in analysis.daily_summaries[1].composition] == [
+        "热身",
+        "稳态跑",
+    ]
+
+
+def test_weekly_analysis_relabels_easy_activity_between_main_records_as_auxiliary() -> None:
+    analysis = analyze_week(
+        WeeklyContext(
+            week_start=date(2026, 6, 15),
+            week_end=date(2026, 6, 21),
+            activities=[
+                _activity(
+                    "main-1",
+                    date(2026, 6, 16),
+                    4,
+                    1200,
+                    "阈值间歇",
+                    start_time_local=datetime(2026, 6, 16, 6, 0),
+                ),
+                _activity(
+                    "easy-between",
+                    date(2026, 6, 16),
+                    1,
+                    300,
+                    "E 跑",
+                    start_time_local=datetime(2026, 6, 16, 6, 25),
+                ),
+                _activity(
+                    "main-2",
+                    date(2026, 6, 16),
+                    4,
+                    1200,
+                    "阈值间歇",
+                    start_time_local=datetime(2026, 6, 16, 6, 35),
+                ),
+            ],
+            previous_week_distance_km=80,
+            recent_4w_avg_distance_km=75,
+            structure=WeeklyTrainingStructure(),
+        )
+    )
+
+    assert [item.label for item in analysis.daily_summaries[1].composition] == [
+        "阈值间歇",
+        "辅助跑",
+        "阈值间歇",
+    ]
+
+
+def test_weekly_analysis_does_not_relabel_overlapping_easy_activity() -> None:
+    analysis = analyze_week(
+        WeeklyContext(
+            week_start=date(2026, 6, 15),
+            week_end=date(2026, 6, 21),
+            activities=[
+                _activity(
+                    "steady",
+                    date(2026, 6, 16),
+                    7,
+                    2100,
+                    "稳态跑",
+                    start_time_local=datetime(2026, 6, 16, 6, 0),
+                ),
+                _activity(
+                    "overlap-easy",
+                    date(2026, 6, 16),
+                    3,
+                    1200,
+                    "E 跑",
+                    start_time_local=datetime(2026, 6, 16, 6, 30),
+                ),
+            ],
+            previous_week_distance_km=80,
+            recent_4w_avg_distance_km=75,
+            structure=WeeklyTrainingStructure(),
+        )
+    )
+
+    assert [item.label for item in analysis.daily_summaries[1].composition] == [
+        "稳态跑",
+        "E 跑",
+    ]
+
+
+def test_weekly_analysis_does_not_relabel_adjacent_easy_only_day() -> None:
+    analysis = analyze_week(
+        WeeklyContext(
+            week_start=date(2026, 6, 15),
+            week_end=date(2026, 6, 21),
+            activities=[
+                _activity(
+                    "easy-1",
+                    date(2026, 6, 16),
+                    5,
+                    1500,
+                    "E 跑",
+                    start_time_local=datetime(2026, 6, 16, 6, 0),
+                ),
+                _activity(
+                    "easy-2",
+                    date(2026, 6, 16),
+                    5,
+                    1500,
+                    "E 跑",
+                    start_time_local=datetime(2026, 6, 16, 6, 30),
+                ),
+            ],
+            previous_week_distance_km=80,
+            recent_4w_avg_distance_km=75,
+            structure=WeeklyTrainingStructure(),
+        )
+    )
+
+    assert [item.label for item in analysis.daily_summaries[1].composition] == [
+        "E 跑",
+        "E 跑",
+    ]
+
+
 def test_weekly_analysis_weights_heart_rate_and_ignores_missing_values() -> None:
     analysis = analyze_week(
         WeeklyContext(

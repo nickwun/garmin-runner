@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta
 from enum import Enum
@@ -323,6 +324,8 @@ def _composition_items(
         label = activity.training_type
         if label == "热身/冷身" and main_span is not None:
             label = _auxiliary_label(index, main_span)
+        elif label in EASY_TYPES and main_span is not None:
+            label = _adjacent_easy_label(activities, index, main_span)
         composition.append(DailyCompositionItem(label, activity.distance_km))
     return tuple(composition)
 
@@ -330,22 +333,30 @@ def _composition_items(
 def _main_activity_span(
     activities: tuple[WeeklyActivity, ...],
 ) -> tuple[int, int] | None:
+    main_indices = _main_activity_indices(activities)
+    if not main_indices:
+        return None
+    return min(main_indices), max(main_indices)
+
+
+def _main_activity_indices(
+    activities: tuple[WeeklyActivity, ...],
+) -> tuple[int, ...]:
     non_auxiliary = [
         (index, activity)
         for index, activity in enumerate(activities)
         if activity.training_type != "热身/冷身"
     ]
     if not non_auxiliary:
-        return None
+        return ()
     highest_priority = max(
         _training_priority(activity.training_type) for _, activity in non_auxiliary
     )
-    main_indices = [
+    return tuple(
         index
         for index, activity in non_auxiliary
         if _training_priority(activity.training_type) == highest_priority
-    ]
-    return min(main_indices), max(main_indices)
+    )
 
 
 def _auxiliary_label(index: int, main_span: tuple[int, int]) -> str:
@@ -355,6 +366,62 @@ def _auxiliary_label(index: int, main_span: tuple[int, int]) -> str:
     if index > last_main:
         return "冷身"
     return "辅助跑"
+
+
+def _adjacent_easy_label(
+    activities: tuple[WeeklyActivity, ...],
+    index: int,
+    main_span: tuple[int, int],
+) -> str:
+    activity = activities[index]
+    first_main, last_main = main_span
+    main_priority = _training_priority(activities[first_main].training_type)
+    if _training_priority(activity.training_type) >= main_priority:
+        return activity.training_type
+
+    if index == first_main - 1 and _activities_are_adjacent(
+        activity, activities[first_main]
+    ):
+        return "热身"
+    if index == last_main + 1 and _activities_are_adjacent(
+        activities[last_main], activity
+    ):
+        return "冷身"
+
+    main_indices = _main_activity_indices(activities)
+    previous_main = max((item for item in main_indices if item < index), default=None)
+    next_main = min((item for item in main_indices if item > index), default=None)
+    if (
+        previous_main is not None
+        and next_main is not None
+        and index == previous_main + 1
+        and index == next_main - 1
+        and _activities_are_adjacent(activities[previous_main], activity)
+        and _activities_are_adjacent(activity, activities[next_main])
+    ):
+        return "辅助跑"
+    return activity.training_type
+
+
+def _activities_are_adjacent(
+    preceding: WeeklyActivity,
+    following: WeeklyActivity,
+) -> bool:
+    if preceding.start_time_local is None or following.start_time_local is None:
+        return False
+    if not math.isfinite(preceding.duration_s) or preceding.duration_s < 0:
+        return False
+    preceding_end = _local_wall_time(preceding.start_time_local) + timedelta(
+        seconds=preceding.duration_s
+    )
+    gap_seconds = (
+        _local_wall_time(following.start_time_local) - preceding_end
+    ).total_seconds()
+    return 0 <= gap_seconds <= 600
+
+
+def _local_wall_time(value: datetime) -> datetime:
+    return value.replace(tzinfo=None)
 
 
 def _has_warmup_or_cooldown(activities: tuple[WeeklyActivity, ...]) -> bool:
