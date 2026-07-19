@@ -746,9 +746,15 @@ def _weekly_activity_from_row(
 
 def _activity_start_time(activity: dict[str, object]) -> datetime | None:
     value = activity.get("start_time_local")
-    if value is None or value == "":
+    if value is None:
         return None
-    return datetime.fromisoformat(str(value))
+    timestamp = str(value).strip()
+    if not timestamp:
+        return None
+    try:
+        return datetime.fromisoformat(timestamp)
+    except ValueError:
+        return None
 
 
 def _weekly_workout_phases(workout_breakdown: object | None) -> tuple[WeeklyWorkoutPhase, ...]:

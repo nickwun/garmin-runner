@@ -89,6 +89,13 @@ def test_weekly_workout_phase_conversion_omits_non_finite_zero_and_missing_value
     assert cli._weekly_workout_phases(breakdown) == ()
 
 
+@pytest.mark.parametrize("start_time_local", ["   ", "not-a-timestamp"])
+def test_weekly_activity_start_time_tolerates_invalid_optional_values(
+    start_time_local: str,
+) -> None:
+    assert cli._activity_start_time({"start_time_local": start_time_local}) is None
+
+
 def test_weekly_analysis_builds_seven_daily_summaries() -> None:
     analysis = analyze_week(
         WeeklyContext(
