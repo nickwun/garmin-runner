@@ -34,6 +34,8 @@ from garmin_runner.analysis.weekly import (
     WeeklyActivity,
     WeeklyContext,
     WeeklyTrainingStructure,
+    WeeklyWorkoutPhase,
+    WeeklyWorkoutPhaseRole,
     analyze_week,
 )
 from garmin_runner.config import load_settings
@@ -736,7 +738,42 @@ def _weekly_activity_from_row(
         report_path=report_path,
         intensity_distance_km=intensity_distance,
         intensity_duration_s=intensity_duration,
+        start_time_local=_activity_start_time(activity),
+        workout_phases=_weekly_workout_phases(analysis.workout_breakdown),
     )
+
+
+def _activity_start_time(activity: dict[str, object]) -> datetime | None:
+    value = activity.get("start_time_local")
+    if value is None or value == "":
+        return None
+    return datetime.fromisoformat(str(value))
+
+
+def _weekly_workout_phases(workout_breakdown: object | None) -> tuple[WeeklyWorkoutPhase, ...]:
+    if workout_breakdown is None:
+        return ()
+
+    phases = (
+        (WeeklyWorkoutPhaseRole.WARMUP, workout_breakdown.warmup),
+        (WeeklyWorkoutPhaseRole.MAIN, workout_breakdown.main),
+        (WeeklyWorkoutPhaseRole.COOLDOWN, workout_breakdown.cooldown),
+    )
+    converted = []
+    for role, phase in phases:
+        distance_km = phase.distance_km or 0.0
+        duration_s = phase.duration_s or 0.0
+        if distance_km <= 0 or duration_s <= 0:
+            continue
+        converted.append(
+            WeeklyWorkoutPhase(
+                role=role,
+                name=phase.name,
+                distance_km=distance_km,
+                duration_s=duration_s,
+            )
+        )
+    return tuple(converted)
 
 
 def _resolve_local_path(value: str) -> Path:

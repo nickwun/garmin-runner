@@ -2,10 +2,13 @@ from __future__ import annotations
 
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from typer.testing import CliRunner
 
+import garmin_runner.cli as cli
+from garmin_runner.analysis.single_activity import WorkoutBreakdown, WorkoutPhase
 from garmin_runner.analysis.weekly import (
     WeeklyActivity,
     WeeklyContext,
@@ -19,6 +22,60 @@ from garmin_runner.reporting.weekly import write_weekly_report
 
 
 runner = CliRunner()
+
+
+def test_weekly_activity_conversion_preserves_start_time_and_non_overlapping_phases(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    summary_path = tmp_path / "summary.json"
+    fit_path = tmp_path / "activity.fit"
+    summary_path.write_text("{}", encoding="utf-8")
+    fit_path.write_bytes(b"fit")
+    breakdown = WorkoutBreakdown(
+        warmup=WorkoutPhase("热身", 3.0, 1200.0, 400.0, 130.0),
+        main=WorkoutPhase("阈值间歇训练", 8.0, 2400.0, 300.0, 170.0),
+        cooldown=WorkoutPhase("冷身", 4.0, 1800.0, 450.0, 135.0),
+        quality=WorkoutPhase("重叠质量段", 6.0, 1800.0, 300.0, 172.0),
+    )
+    analysis = SimpleNamespace(
+        basic=SimpleNamespace(
+            activity_id="123",
+            activity_date=date(2026, 6, 19),
+            activity_name="阈值训练",
+            distance_km=15.0,
+            duration_s=5400.0,
+            average_hr=150.0,
+        ),
+        training_type="阈值间歇",
+        execution_score=88,
+        workout_breakdown=breakdown,
+    )
+    report_path = tmp_path / "reports" / "daily" / "2026-06-19_123.md"
+    monkeypatch.setattr(cli, "decode_fit_messages", lambda path: ({}, []))
+    monkeypatch.setattr(cli, "extract_time_series", lambda messages: [])
+    monkeypatch.setattr(cli, "analyze_activity", lambda summary, points, config: analysis)
+    monkeypatch.setattr(cli, "write_daily_report", lambda result, reports_dir: report_path)
+
+    converted = cli._weekly_activity_from_row(
+        {
+            "activity_id": "123",
+            "start_time_local": "2026-06-19T06:10:00",
+            "summary_path": str(summary_path),
+            "fit_path": str(fit_path),
+        },
+        tmp_path / "reports",
+        object(),
+    )
+
+    assert converted.start_time_local == datetime(2026, 6, 19, 6, 10)
+    assert converted.workout_phases == (
+        WeeklyWorkoutPhase(WeeklyWorkoutPhaseRole.WARMUP, "热身", 3.0, 1200.0),
+        WeeklyWorkoutPhase(WeeklyWorkoutPhaseRole.MAIN, "阈值间歇训练", 8.0, 2400.0),
+        WeeklyWorkoutPhase(WeeklyWorkoutPhaseRole.COOLDOWN, "冷身", 4.0, 1800.0),
+    )
+    assert converted.intensity_distance_km == 8.0
+    assert converted.intensity_duration_s == 2400.0
 
 
 def test_weekly_analysis_builds_seven_daily_summaries() -> None:
