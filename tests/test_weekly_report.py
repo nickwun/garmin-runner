@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -248,6 +248,107 @@ def test_weekly_analysis_orders_activities_by_time_missing_state_and_id() -> Non
         "same-b",
         "missing",
     ]
+
+
+def test_weekly_analysis_orders_mixed_timezone_times_by_local_wall_clock() -> None:
+    analysis = analyze_week(
+        WeeklyContext(
+            week_start=date(2026, 6, 15),
+            week_end=date(2026, 6, 21),
+            activities=[
+                _activity(
+                    "naive-later",
+                    date(2026, 6, 16),
+                    2,
+                    600,
+                    "E 跑",
+                    start_time_local=datetime(2026, 6, 16, 6, 30),
+                ),
+                _activity(
+                    "aware-earlier",
+                    date(2026, 6, 16),
+                    2,
+                    600,
+                    "E 跑",
+                    start_time_local=datetime(
+                        2026,
+                        6,
+                        16,
+                        6,
+                        0,
+                        tzinfo=timezone(timedelta(hours=8)),
+                    ),
+                ),
+            ],
+            previous_week_distance_km=80,
+            recent_4w_avg_distance_km=75,
+            structure=WeeklyTrainingStructure(),
+        )
+    )
+
+    assert [item.activity_id for item in analysis.daily_summaries[1].activities] == [
+        "aware-earlier",
+        "naive-later",
+    ]
+
+
+def test_weekly_analysis_excludes_out_of_range_activities_everywhere() -> None:
+    analysis = analyze_week(
+        WeeklyContext(
+            week_start=date(2026, 6, 15),
+            week_end=date(2026, 6, 21),
+            activities=[
+                _activity("inside", date(2026, 6, 16), 10, 3000, "E 跑"),
+                _activity("outside", date(2026, 6, 22), 30, 9000, "间歇课"),
+            ],
+            previous_week_distance_km=10,
+            recent_4w_avg_distance_km=10,
+            structure=WeeklyTrainingStructure(),
+        )
+    )
+
+    assert analysis.total_distance_km == 10
+    assert analysis.total_duration_s == 3000
+    assert analysis.running_days == 1
+    assert analysis.rest_days == 6
+    assert analysis.high_intensity_count == 0
+    assert analysis.high_intensity.distance_km == 0
+    assert all("outside" not in workout.activity.activity_id for workout in analysis.key_workouts)
+    assert [
+        activity.activity_id
+        for summary in analysis.daily_summaries
+        for activity in summary.activities
+    ] == ["inside"]
+    assert analysis.risk_signals == ["未发现明显风险信号"]
+
+
+def test_weekly_analysis_detects_warmup_and_cooldown_by_phase_role() -> None:
+    phases = (
+        WeeklyWorkoutPhase(WeeklyWorkoutPhaseRole.WARMUP, "慢跑", 3, 1200),
+        WeeklyWorkoutPhase(WeeklyWorkoutPhaseRole.MAIN, "稳态主体", 7, 2100),
+        WeeklyWorkoutPhase(WeeklyWorkoutPhaseRole.COOLDOWN, "放松", 5, 1800),
+    )
+    analysis = analyze_week(
+        WeeklyContext(
+            week_start=date(2026, 6, 15),
+            week_end=date(2026, 6, 21),
+            activities=[
+                _activity(
+                    "structured",
+                    date(2026, 6, 16),
+                    15,
+                    5100,
+                    "稳态跑",
+                    workout_phases=phases,
+                )
+            ],
+            previous_week_distance_km=80,
+            recent_4w_avg_distance_km=75,
+            structure=WeeklyTrainingStructure(),
+        )
+    )
+
+    assert analysis.daily_summaries[1].training_type == "稳态跑（含热身冷身）"
 
 
 def test_weekly_analysis_dominant_tie_prefers_duration_then_start_time() -> None:

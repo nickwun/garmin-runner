@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta
 from enum import Enum
 from pathlib import Path
@@ -143,7 +143,15 @@ class WeeklyAnalysis:
 
 
 def analyze_week(context: WeeklyContext) -> WeeklyAnalysis:
-    activities = sorted(context.activities, key=lambda item: item.activity_date)
+    activities = sorted(
+        (
+            item
+            for item in context.activities
+            if context.week_start <= item.activity_date <= context.week_end
+        ),
+        key=lambda item: item.activity_date,
+    )
+    context = replace(context, activities=activities)
     total_distance = round(sum(item.distance_km for item in activities), 2)
     total_duration = sum(item.duration_s for item in activities)
     running_days = len({item.activity_date for item in activities})
@@ -277,9 +285,14 @@ def _daily_summaries(context: WeeklyContext) -> list[DailyTrainingSummary]:
 
 
 def _activity_order_key(activity: WeeklyActivity) -> tuple[bool, datetime, str]:
+    local_time = (
+        activity.start_time_local.replace(tzinfo=None)
+        if activity.start_time_local is not None
+        else datetime.max
+    )
     return (
         activity.start_time_local is None,
-        activity.start_time_local or datetime.max,
+        local_time,
         activity.activity_id,
     )
 
@@ -347,7 +360,11 @@ def _auxiliary_label(index: int, main_span: tuple[int, int]) -> str:
 def _has_warmup_or_cooldown(activities: tuple[WeeklyActivity, ...]) -> bool:
     return any(
         activity.training_type == "热身/冷身"
-        or any(phase.name in {"热身", "冷身"} for phase in activity.workout_phases)
+        or any(
+            phase.role
+            in {WeeklyWorkoutPhaseRole.WARMUP, WeeklyWorkoutPhaseRole.COOLDOWN}
+            for phase in activity.workout_phases
+        )
         for activity in activities
     )
 
