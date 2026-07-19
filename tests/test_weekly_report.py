@@ -427,6 +427,76 @@ def test_weekly_analysis_does_not_relabel_adjacent_easy_only_day() -> None:
     ]
 
 
+def test_weekly_analysis_keeps_adjacent_easy_and_recovery_labels() -> None:
+    analysis = analyze_week(
+        WeeklyContext(
+            week_start=date(2026, 6, 15),
+            week_end=date(2026, 6, 21),
+            activities=[
+                _activity(
+                    "easy",
+                    date(2026, 6, 16),
+                    5,
+                    1500,
+                    "E 跑",
+                    start_time_local=datetime(2026, 6, 16, 6, 0),
+                ),
+                _activity(
+                    "recovery",
+                    date(2026, 6, 16),
+                    2,
+                    900,
+                    "恢复跑",
+                    start_time_local=datetime(2026, 6, 16, 6, 30),
+                ),
+            ],
+            previous_week_distance_km=80,
+            recent_4w_avg_distance_km=75,
+            structure=WeeklyTrainingStructure(),
+        )
+    )
+
+    assert [item.label for item in analysis.daily_summaries[1].composition] == [
+        "E 跑",
+        "恢复跑",
+    ]
+
+
+def test_weekly_analysis_keeps_easy_label_adjacent_to_race() -> None:
+    analysis = analyze_week(
+        WeeklyContext(
+            week_start=date(2026, 6, 15),
+            week_end=date(2026, 6, 21),
+            activities=[
+                _activity(
+                    "race",
+                    date(2026, 6, 16),
+                    10,
+                    2400,
+                    "比赛",
+                    start_time_local=datetime(2026, 6, 16, 6, 0),
+                ),
+                _activity(
+                    "easy",
+                    date(2026, 6, 16),
+                    2,
+                    900,
+                    "E 跑",
+                    start_time_local=datetime(2026, 6, 16, 6, 45),
+                ),
+            ],
+            previous_week_distance_km=80,
+            recent_4w_avg_distance_km=75,
+            structure=WeeklyTrainingStructure(),
+        )
+    )
+
+    assert [item.label for item in analysis.daily_summaries[1].composition] == [
+        "比赛",
+        "E 跑",
+    ]
+
+
 def test_weekly_analysis_weights_heart_rate_and_ignores_missing_values() -> None:
     analysis = analyze_week(
         WeeklyContext(

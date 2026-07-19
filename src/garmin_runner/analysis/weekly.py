@@ -313,6 +313,9 @@ def _composition_items(
     activities: tuple[WeeklyActivity, ...],
 ) -> tuple[DailyCompositionItem, ...]:
     main_span = _main_activity_span(activities)
+    inferred_main_span = _main_activity_span(
+        activities, eligible_types=MEDIUM_HIGH_TYPES
+    )
     composition: list[DailyCompositionItem] = []
     for index, activity in enumerate(activities):
         if activity.workout_phases:
@@ -324,16 +327,17 @@ def _composition_items(
         label = activity.training_type
         if label == "热身/冷身" and main_span is not None:
             label = _auxiliary_label(index, main_span)
-        elif label in EASY_TYPES and main_span is not None:
-            label = _adjacent_easy_label(activities, index, main_span)
+        elif label in EASY_TYPES and inferred_main_span is not None:
+            label = _adjacent_easy_label(activities, index, inferred_main_span)
         composition.append(DailyCompositionItem(label, activity.distance_km))
     return tuple(composition)
 
 
 def _main_activity_span(
     activities: tuple[WeeklyActivity, ...],
+    eligible_types: set[str] | None = None,
 ) -> tuple[int, int] | None:
-    main_indices = _main_activity_indices(activities)
+    main_indices = _main_activity_indices(activities, eligible_types)
     if not main_indices:
         return None
     return min(main_indices), max(main_indices)
@@ -341,11 +345,13 @@ def _main_activity_span(
 
 def _main_activity_indices(
     activities: tuple[WeeklyActivity, ...],
+    eligible_types: set[str] | None = None,
 ) -> tuple[int, ...]:
     non_auxiliary = [
         (index, activity)
         for index, activity in enumerate(activities)
         if activity.training_type != "热身/冷身"
+        and (eligible_types is None or activity.training_type in eligible_types)
     ]
     if not non_auxiliary:
         return ()
@@ -388,7 +394,7 @@ def _adjacent_easy_label(
     ):
         return "冷身"
 
-    main_indices = _main_activity_indices(activities)
+    main_indices = _main_activity_indices(activities, MEDIUM_HIGH_TYPES)
     previous_main = max((item for item in main_indices if item < index), default=None)
     next_main = min((item for item in main_indices if item > index), default=None)
     if (
