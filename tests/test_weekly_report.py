@@ -3,12 +3,15 @@ from __future__ import annotations
 from datetime import date, datetime
 from pathlib import Path
 
+import pytest
 from typer.testing import CliRunner
 
 from garmin_runner.analysis.weekly import (
     WeeklyActivity,
     WeeklyContext,
     WeeklyTrainingStructure,
+    WeeklyWorkoutPhase,
+    WeeklyWorkoutPhaseRole,
     analyze_week,
 )
 from garmin_runner.cli import app
@@ -164,6 +167,180 @@ def test_weekly_analysis_keeps_labels_for_auxiliary_only_day() -> None:
         "热身/冷身",
         "热身/冷身",
     ]
+
+
+def test_weekly_analysis_expands_only_exclusive_structured_phases() -> None:
+    phases = (
+        WeeklyWorkoutPhase(WeeklyWorkoutPhaseRole.WARMUP, "热身", 3, 1200),
+        WeeklyWorkoutPhase(WeeklyWorkoutPhaseRole.MAIN, "2 公里阈值间歇", 8, 2400),
+        WeeklyWorkoutPhase(WeeklyWorkoutPhaseRole.COOLDOWN, "冷身", 4, 1500),
+    )
+    analysis = analyze_week(
+        WeeklyContext(
+            week_start=date(2026, 6, 15),
+            week_end=date(2026, 6, 21),
+            activities=[
+                _activity(
+                    "structured",
+                    date(2026, 6, 16),
+                    15,
+                    5100,
+                    "阈值间歇",
+                    workout_phases=phases,
+                )
+            ],
+            previous_week_distance_km=80,
+            recent_4w_avg_distance_km=75,
+            structure=WeeklyTrainingStructure(),
+        )
+    )
+
+    assert [
+        (item.label, item.distance_km)
+        for item in analysis.daily_summaries[1].composition
+    ] == [("热身", 3), ("2 公里阈值间歇", 8), ("冷身", 4)]
+
+    with pytest.raises(ValueError, match="互斥阶段"):
+        WeeklyWorkoutPhase("quality", "重叠质量段", 8, 2400)  # type: ignore[arg-type]
+
+
+def test_weekly_analysis_combined_pace_uses_unrounded_distance() -> None:
+    analysis = analyze_week(
+        WeeklyContext(
+            week_start=date(2026, 6, 15),
+            week_end=date(2026, 6, 21),
+            activities=[
+                _activity("a", date(2026, 6, 16), 1.234, 300, "E 跑"),
+                _activity("b", date(2026, 6, 16), 1.234, 300, "E 跑"),
+            ],
+            previous_week_distance_km=80,
+            recent_4w_avg_distance_km=75,
+            structure=WeeklyTrainingStructure(),
+        )
+    )
+
+    summary = analysis.daily_summaries[1]
+    assert summary.total_distance_km == 2.47
+    assert summary.combined_pace_s_per_km == pytest.approx(600 / 2.468)
+
+
+def test_weekly_analysis_orders_activities_by_time_missing_state_and_id() -> None:
+    shared_time = datetime(2026, 6, 16, 6, 30)
+    analysis = analyze_week(
+        WeeklyContext(
+            week_start=date(2026, 6, 15),
+            week_end=date(2026, 6, 21),
+            activities=[
+                _activity("missing", date(2026, 6, 16), 2, 600, "E 跑"),
+                _activity("same-b", date(2026, 6, 16), 2, 600, "E 跑", start_time_local=shared_time),
+                _activity("earlier", date(2026, 6, 16), 2, 600, "E 跑", start_time_local=datetime(2026, 6, 16, 6, 0)),
+                _activity("same-a", date(2026, 6, 16), 2, 600, "E 跑", start_time_local=shared_time),
+            ],
+            previous_week_distance_km=80,
+            recent_4w_avg_distance_km=75,
+            structure=WeeklyTrainingStructure(),
+        )
+    )
+
+    assert [item.activity_id for item in analysis.daily_summaries[1].activities] == [
+        "earlier",
+        "same-a",
+        "same-b",
+        "missing",
+    ]
+
+
+def test_weekly_analysis_dominant_tie_prefers_duration_then_start_time() -> None:
+    longer_analysis = analyze_week(
+        WeeklyContext(
+            week_start=date(2026, 6, 15),
+            week_end=date(2026, 6, 21),
+            activities=[
+                _activity(
+                    "earlier-short",
+                    date(2026, 6, 16),
+                    4,
+                    1200,
+                    "稳态跑",
+                    start_time_local=datetime(2026, 6, 16, 6, 0),
+                ),
+                _activity(
+                    "later-long",
+                    date(2026, 6, 16),
+                    6,
+                    1800,
+                    "马配桥梁",
+                    start_time_local=datetime(2026, 6, 16, 7, 0),
+                ),
+            ],
+            previous_week_distance_km=80,
+            recent_4w_avg_distance_km=75,
+            structure=WeeklyTrainingStructure(),
+        )
+    )
+
+    assert longer_analysis.daily_summaries[1].training_type == "马配桥梁"
+
+    earlier_analysis = analyze_week(
+        WeeklyContext(
+            week_start=date(2026, 6, 15),
+            week_end=date(2026, 6, 21),
+            activities=[
+                _activity(
+                    "earlier",
+                    date(2026, 6, 16),
+                    6,
+                    1800,
+                    "稳态跑",
+                    start_time_local=datetime(2026, 6, 16, 6, 0),
+                ),
+                _activity(
+                    "later",
+                    date(2026, 6, 16),
+                    6,
+                    1800,
+                    "马配桥梁",
+                    start_time_local=datetime(2026, 6, 16, 7, 0),
+                ),
+            ],
+            previous_week_distance_km=80,
+            recent_4w_avg_distance_km=75,
+            structure=WeeklyTrainingStructure(),
+        )
+    )
+
+    assert earlier_analysis.daily_summaries[1].training_type == "稳态跑"
+
+    shared_time = datetime(2026, 6, 16, 6, 0)
+    id_analysis = analyze_week(
+        WeeklyContext(
+            week_start=date(2026, 6, 15),
+            week_end=date(2026, 6, 21),
+            activities=[
+                _activity(
+                    "z",
+                    date(2026, 6, 16),
+                    6,
+                    1800,
+                    "稳态跑",
+                    start_time_local=shared_time,
+                ),
+                _activity(
+                    "a",
+                    date(2026, 6, 16),
+                    6,
+                    1800,
+                    "马配桥梁",
+                    start_time_local=shared_time,
+                ),
+            ],
+            previous_week_distance_km=80,
+            recent_4w_avg_distance_km=75,
+            structure=WeeklyTrainingStructure(),
+        )
+    )
+
+    assert id_analysis.daily_summaries[1].training_type == "马配桥梁"
 
 
 def test_weekly_report_calculates_volume_structure_and_risks(tmp_path: Path) -> None:
@@ -327,6 +504,7 @@ def _activity(
     intensity_duration_s: float | None = None,
     average_hr: float | None = None,
     start_time_local: datetime | None = None,
+    workout_phases: tuple[WeeklyWorkoutPhase, ...] = (),
 ) -> WeeklyActivity:
     return WeeklyActivity(
         activity_id=activity_id,
@@ -341,4 +519,5 @@ def _activity(
         intensity_distance_km=intensity_distance_km,
         intensity_duration_s=intensity_duration_s,
         start_time_local=start_time_local,
+        workout_phases=workout_phases,
     )

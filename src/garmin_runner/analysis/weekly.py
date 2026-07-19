@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
+from enum import Enum
 from pathlib import Path
 
 
@@ -24,11 +25,22 @@ class WeeklyTrainingStructure:
     b_race_note: str = "东营作为 B 赛测试，不全力"
 
 
+class WeeklyWorkoutPhaseRole(str, Enum):
+    WARMUP = "warmup"
+    MAIN = "main"
+    COOLDOWN = "cooldown"
+
+
 @dataclass(frozen=True)
 class WeeklyWorkoutPhase:
+    role: WeeklyWorkoutPhaseRole
     name: str
     distance_km: float
     duration_s: float
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.role, WeeklyWorkoutPhaseRole):
+            raise ValueError("周训练组成只接受热身、主训练和冷身三个互斥阶段")
 
 
 @dataclass(frozen=True)
@@ -229,7 +241,8 @@ def _daily_summaries(context: WeeklyContext) -> list[DailyTrainingSummary]:
             current_date += timedelta(days=1)
             continue
 
-        total_distance = round(sum(item.distance_km for item in activities), 2)
+        raw_total_distance = sum(item.distance_km for item in activities)
+        total_distance = round(raw_total_distance, 2)
         total_duration = sum(item.duration_s for item in activities)
         hr_activities = [item for item in activities if item.average_hr is not None]
         hr_duration = sum(item.duration_s for item in hr_activities)
@@ -251,8 +264,8 @@ def _daily_summaries(context: WeeklyContext) -> list[DailyTrainingSummary]:
                 total_distance_km=total_distance,
                 total_duration_s=total_duration,
                 combined_pace_s_per_km=(
-                    total_duration / total_distance
-                    if total_distance > 0 and total_duration > 0
+                    total_duration / raw_total_distance
+                    if raw_total_distance > 0 and total_duration > 0
                     else None
                 ),
                 average_hr=average_hr,
