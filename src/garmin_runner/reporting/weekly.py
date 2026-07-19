@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from urllib.parse import quote
 
 from garmin_runner.analysis.weekly import DailyTrainingSummary, WeeklyAnalysis
 
@@ -105,8 +106,8 @@ def _render_daily_details(summaries: list[DailyTrainingSummary]) -> str:
             + " | ".join(
                 (
                     date_label,
-                    summary.training_type,
-                    _format_composition(summary),
+                    _escape_markdown_table_text(summary.training_type),
+                    _escape_markdown_table_text(_format_composition(summary)),
                     f"{summary.total_distance_km:.1f} km",
                     _format_duration(summary.total_duration_s),
                     _format_pace(summary.combined_pace_s_per_km),
@@ -116,8 +117,8 @@ def _render_daily_details(summaries: list[DailyTrainingSummary]) -> str:
             + " |"
         )
         links = "、".join(
-            f"[{activity.training_type} {activity.activity_id}]"
-            f"(../daily/{activity.report_path.name})"
+            f"[{_escape_markdown_link_label(f'{activity.training_type} {activity.activity_id}')}]"
+            f"(../daily/{_encode_url_path_component(activity.report_path.name)})"
             for activity in summary.activities
         )
         if links:
@@ -135,6 +136,18 @@ def _format_composition(summary: DailyTrainingSummary) -> str:
         )
         + " km"
     )
+
+
+def _escape_markdown_table_text(value: str) -> str:
+    return value.replace("\\", "\\\\").replace("|", "\\|")
+
+
+def _escape_markdown_link_label(value: str) -> str:
+    return value.replace("\\", "\\\\").replace("[", "\\[").replace("]", "\\]")
+
+
+def _encode_url_path_component(value: str) -> str:
+    return quote(value, safe="")
 
 
 def _format_pace(seconds_per_km: float | None) -> str:

@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import replace
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
+import re
 from types import SimpleNamespace
 
 import pytest
@@ -627,6 +628,59 @@ def test_weekly_report_renders_relative_daily_links_without_private_paths(
     assert "private-health-data" not in content
     for private_marker in (".fit", "summary.json", ".sqlite", "token", "cookie"):
         assert private_marker not in content.lower()
+
+
+def test_weekly_report_escapes_dynamic_markdown_and_encodes_report_filename(
+    tmp_path: Path,
+) -> None:
+    phases = (
+        WeeklyWorkoutPhase(
+            WeeklyWorkoutPhaseRole.MAIN,
+            r"主|训练\段",
+            10,
+            3000,
+        ),
+    )
+    private_dir = tmp_path / "private-health-data" / "reports" / "daily"
+    activity = replace(
+        _activity(
+            "run[1]",
+            date(2026, 6, 16),
+            10,
+            3000,
+            r"稳态|跑\测试[甲]",
+            workout_phases=phases,
+        ),
+        report_path=private_dir / "训练 报告(甲).md",
+    )
+    analysis = analyze_week(
+        WeeklyContext(
+            week_start=date(2026, 6, 15),
+            week_end=date(2026, 6, 21),
+            activities=[activity],
+            previous_week_distance_km=80,
+            recent_4w_avg_distance_km=75,
+            structure=WeeklyTrainingStructure(),
+        )
+    )
+
+    content = write_weekly_report(analysis, tmp_path / "output").read_text(
+        encoding="utf-8"
+    )
+    activity_row = next(
+        line for line in content.splitlines() if line.startswith("| 2026-06-16")
+    )
+
+    assert r"稳态\|跑\\测试[甲]" in activity_row
+    assert r"主\|训练\\段 10.0 km" in activity_row
+    assert len(re.split(r"(?<!\\)\|", activity_row)) == 9
+    assert (
+        r"[稳态|跑\\测试\[甲\] run\[1\]]"
+        "(../daily/%E8%AE%AD%E7%BB%83%20%E6%8A%A5%E5%91%8A%28%E7%94%B2%29.md)"
+        in content
+    )
+    assert str(tmp_path) not in content
+    assert "private-health-data" not in content
 
 
 def test_weekly_report_calculates_volume_structure_and_risks(tmp_path: Path) -> None:
