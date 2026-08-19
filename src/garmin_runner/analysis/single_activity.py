@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import statistics
 from dataclasses import dataclass
 from datetime import date, datetime
@@ -927,7 +928,9 @@ def _drift_not_applicable(
     pace_stability: PaceStability,
 ) -> bool:
     name = (summary.get("activityName") or "").lower()
-    if _name_has_any(name, ("interval", "间歇", "4×", "5×", "4x", "5x")):
+    if _looks_like_threshold_interval(name) or _name_has_any(
+        name, ("interval", "间歇")
+    ):
         return True
     if training_type in {"比赛", "间歇课", "阈值间歇"}:
         return True
@@ -940,6 +943,8 @@ def _name_has_any(name: str, keywords: tuple[str, ...]) -> bool:
 
 def _looks_like_threshold_interval(name: str) -> bool:
     compact = name.replace(" ", "")
+    if re.search(r"\d+(?:×|x|\*)\d+(?:公里|km)", compact):
+        return True
     if any(pattern in compact for pattern in ("×2公里", "x2公里", "x2km")):
         return True
     return "2公里" in compact and _name_has_any(

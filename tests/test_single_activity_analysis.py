@@ -341,6 +341,47 @@ def test_two_kilometer_repeats_are_threshold_intervals() -> None:
     assert analysis.heart_rate_drift.applicable is False
 
 
+def test_ascii_star_three_kilometer_repeats_are_threshold_intervals() -> None:
+    summary = {
+        "activityId": "629503509",
+        "activityName": "福州市 - 3*3km",
+        "startTimeLocal": "2026-08-19T05:50:11",
+        "distance": 11140.0,
+        "duration": 3081.904,
+        "averageHR": 161,
+        "maxHR": 179,
+    }
+
+    analysis = analyze_activity(
+        summary,
+        _steady_points(distance_m=11140.0, duration_s=3081.904, heart_rate=161),
+        _training_config_from_image(),
+    )
+
+    assert analysis.training_type == "阈值间歇"
+    assert analysis.heart_rate_drift.applicable is False
+
+
+def test_short_strides_are_not_threshold_intervals() -> None:
+    summary = {
+        "activityId": "strides",
+        "activityName": "E 跑 + 6×100m",
+        "startTimeLocal": "2026-08-13T06:13:30",
+        "distance": 16000.0,
+        "duration": 5400.0,
+        "averageHR": 138,
+        "maxHR": 162,
+    }
+
+    analysis = analyze_activity(
+        summary,
+        _steady_points(distance_m=16000.0, duration_s=5400.0, heart_rate=138),
+        _training_config_from_image(),
+    )
+
+    assert analysis.training_type == "E 跑"
+
+
 def test_threshold_intervals_split_warmup_main_and_cooldown() -> None:
     summary = {
         "activityId": "split-interval",
