@@ -122,7 +122,12 @@ def analyze(
         if errors:
             raise ValueError(f"FIT 解析失败，activity_id={activity_id}")
         points = extract_time_series(messages)
-        analysis = analyze_activity(summary, points, training_config)
+        laps = messages.get("lap_mesgs")
+        analysis = (
+            analyze_activity(summary, points, training_config, laps)
+            if laps
+            else analyze_activity(summary, points, training_config)
+        )
         report_path = write_daily_report(analysis, settings.storage.reports_dir)
     except Exception as exc:
         typer.secho(f"分析失败：{exc}", fg=typer.colors.RED, err=True)
@@ -635,6 +640,9 @@ def _daily_analysis(activity_id: str, settings: object) -> object:
     if errors:
         raise ValueError(f"FIT 解析失败，activity_id={activity_id}")
     points = extract_time_series(messages)
+    laps = messages.get("lap_mesgs")
+    if laps:
+        return analyze_activity(summary, points, training_config, laps)
     return analyze_activity(summary, points, training_config)
 
 
@@ -720,7 +728,12 @@ def _weekly_activity_from_row(
     if errors:
         raise ValueError(f"FIT 解析失败，activity_id={activity['activity_id']}")
     points = extract_time_series(messages)
-    analysis = analyze_activity(summary, points, training_config)
+    laps = messages.get("lap_mesgs")
+    analysis = (
+        analyze_activity(summary, points, training_config, laps)
+        if laps
+        else analyze_activity(summary, points, training_config)
+    )
     report_path = write_daily_report(analysis, reports_dir)
     intensity_distance = None
     intensity_duration = None

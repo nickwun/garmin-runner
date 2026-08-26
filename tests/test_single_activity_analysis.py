@@ -429,6 +429,48 @@ def test_daily_report_renders_interval_breakdown(tmp_path: Path) -> None:
     assert "冷身：3.0 km" in content
 
 
+def test_threshold_interval_uses_fit_laps_without_recovery_time() -> None:
+    summary = {
+        "activityId": "lap-interval",
+        "activityName": "福州市 - 5×2 公里",
+        "startTimeLocal": "2026-08-25T06:11:28",
+        "distance": 9400.0,
+        "duration": 2630.0,
+        "averageHR": 159,
+        "maxHR": 179,
+    }
+    laps = [
+        _fit_lap(400, 116, 124),
+        _fit_lap(1000, 250, 151),
+        _fit_lap(1000, 247, 161),
+        _fit_lap(200, 120, 140),
+        _fit_lap(1000, 240, 157),
+        _fit_lap(1000, 241, 167),
+        _fit_lap(210, 120, 147),
+        _fit_lap(1000, 238, 163),
+        _fit_lap(1000, 240, 173),
+        _fit_lap(200, 120, 155),
+        _fit_lap(1000, 239, 168),
+        _fit_lap(1000, 238, 177),
+        _fit_lap(400, 220, 143),
+    ]
+
+    analysis = analyze_activity(
+        summary,
+        _interval_points(),
+        _training_config_from_image(),
+        laps,
+    )
+
+    assert analysis.workout_breakdown is not None
+    assert analysis.workout_breakdown.warmup.distance_km == 0.4
+    assert analysis.workout_breakdown.main.distance_km == 8.61
+    assert analysis.workout_breakdown.quality.distance_km == 8.0
+    assert analysis.workout_breakdown.quality.duration_s == 1933
+    assert analysis.workout_breakdown.quality.average_pace_s_per_km == 241.625
+    assert analysis.workout_breakdown.cooldown.distance_km == 0.4
+
+
 def test_structured_steady_run_splits_warmup_main_and_cooldown() -> None:
     summary = {
         "activityId": "structured-steady",
@@ -653,6 +695,14 @@ def _interval_points() -> list[TimeSeriesPoint]:
         )
         for offset_s, distance_m, heart_rate, speed_mps in rows
     ]
+
+
+def _fit_lap(distance_m: float, duration_s: float, average_hr: float) -> dict[str, float]:
+    return {
+        "total_distance": distance_m,
+        "total_timer_time": duration_s,
+        "avg_heart_rate": average_hr,
+    }
 
 
 def _structured_steady_points() -> list[TimeSeriesPoint]:

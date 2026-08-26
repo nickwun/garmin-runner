@@ -150,12 +150,15 @@ def analyze_activity(
     summary: dict[str, Any],
     points: list[TimeSeriesPoint],
     config: TrainingConfig,
+    laps: list[dict[str, Any]] | None = None,
 ) -> SingleActivityAnalysis:
     basic = _basic_metrics(summary, points)
     hr_zones = _hr_zone_summary(points, config.heart_rate_zones)
     pace_stability = _pace_stability(points)
     training_type = _classify_training(summary, basic, hr_zones, pace_stability, config)
-    workout_breakdown = _workout_breakdown(points, training_type, config.heart_rate_zones)
+    workout_breakdown = _workout_breakdown(
+        points, training_type, config.heart_rate_zones, laps
+    )
     training_type = _refine_training_type_with_breakdown(
         training_type, workout_breakdown, config.heart_rate_zones
     )
@@ -548,7 +551,13 @@ def _workout_breakdown(
     points: list[TimeSeriesPoint],
     training_type: str,
     zones: HeartRateZones,
+    laps: list[dict[str, Any]] | None = None,
 ) -> WorkoutBreakdown | None:
+    if training_type == "阈值间歇" and laps:
+        lap_breakdown = _threshold_interval_lap_breakdown(laps)
+        if lap_breakdown is not None:
+            return lap_breakdown
+
     chunks = _distance_chunks(points)
     if len(chunks) < 3:
         return None
@@ -609,6 +618,65 @@ def _workout_breakdown(
         main=main_phase,
         cooldown=_phase("冷身", cooldown),
         quality=_phase(_quality_phase_name(training_type, main_phase), quality),
+    )
+
+
+def _threshold_interval_lap_breakdown(
+    laps: list[dict[str, Any]],
+) -> WorkoutBreakdown | None:
+    chunks: list[_Chunk] = []
+    cursor_m = 0.0
+    for lap in laps:
+        distance_m = _number(lap.get("total_distance"))
+        duration_s = _number(lap.get("total_timer_time"))
+        if distance_m is None or duration_s is None or distance_m < 20 or duration_s <= 0:
+            continue
+        chunks.append(
+            _Chunk(
+                start_m=cursor_m,
+                end_m=cursor_m + distance_m,
+                distance_m=distance_m,
+                duration_s=duration_s,
+                pace_s_per_km=duration_s / (distance_m / 1000),
+                average_hr_bpm=_number(lap.get("avg_heart_rate")),
+            )
+        )
+        cursor_m += distance_m
+
+    long_laps = [
+        (index, chunk)
+        for index, chunk in enumerate(chunks)
+        if 800 <= chunk.distance_m <= 1200
+    ]
+    if len(long_laps) < 4:
+        return None
+    paces = [chunk.pace_s_per_km for chunk in chunks]
+    pace_range = max(paces) - min(paces)
+    if pace_range < 20:
+        return None
+    fast_cutoff = min(paces) + pace_range * 0.45
+    quality_indexes = [
+        index
+        for index, chunk in long_laps
+        if chunk.pace_s_per_km <= fast_cutoff
+    ]
+    if len(quality_indexes) < 4:
+        return None
+
+    first_quality = quality_indexes[0]
+    last_quality = quality_indexes[-1]
+    quality = [chunks[index] for index in quality_indexes]
+    quality_distance_km = sum(chunk.distance_m for chunk in quality) / 1000
+    if quality_distance_km < 4:
+        return None
+
+    main = chunks[first_quality : last_quality + 1]
+    main_phase = _phase("阈值间歇训练段", main)
+    return WorkoutBreakdown(
+        warmup=_phase("热身", chunks[:first_quality]),
+        main=main_phase,
+        cooldown=_phase("冷身", chunks[last_quality + 1 :]),
+        quality=_phase("阈值快段", quality),
     )
 
 
