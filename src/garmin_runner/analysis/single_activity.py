@@ -162,7 +162,13 @@ def analyze_activity(
     training_type = _refine_training_type_with_breakdown(
         training_type, workout_breakdown, config.heart_rate_zones
     )
-    drift = _heart_rate_drift(summary, points, training_type, pace_stability)
+    drift = _heart_rate_drift(
+        summary,
+        points,
+        training_type,
+        pace_stability,
+        config.heart_rate_zones,
+    )
     confidence = _analysis_confidence(summary, basic, points, pace_stability, training_type)
     not_applicable_notes = _not_applicable_notes(drift, confidence)
     execution_score = _score_execution(
@@ -290,9 +296,15 @@ def _heart_rate_drift(
     points: list[TimeSeriesPoint],
     training_type: str,
     pace_stability: PaceStability,
+    zones: HeartRateZones,
 ) -> HeartRateDrift:
     if _drift_not_applicable(summary, training_type, pace_stability):
         reason = "间歇课、比赛或明显变速课不使用全程前后半心率漂移判断"
+        return HeartRateDrift(None, None, None, "不适用", applicable=False, reason=reason)
+    if _low_intensity_slowdown_invalidates_drift(
+        summary, points, training_type, pace_stability, zones
+    ):
+        reason = "低强度跑后半程明显降速，前后强度不一致，不使用全程 pace/hr 判断心率漂移"
         return HeartRateDrift(None, None, None, "不适用", applicable=False, reason=reason)
     if len(points) < 3:
         return HeartRateDrift(None, None, None, "数据不足")
@@ -309,6 +321,25 @@ def _heart_rate_drift(
     else:
         label = "明显漂移"
     return HeartRateDrift(first, second, drift, label)
+
+
+def _low_intensity_slowdown_invalidates_drift(
+    summary: dict[str, Any],
+    points: list[TimeSeriesPoint],
+    training_type: str,
+    pace_stability: PaceStability,
+    zones: HeartRateZones,
+) -> bool:
+    if training_type not in {"恢复跑", "MAF 跑", "E 跑"}:
+        return False
+    slowdown = pace_stability.late_slowdown_pct
+    if slowdown is None or slowdown < 5:
+        return False
+    values = _summary_values(summary)
+    average_hr = _number(values.get("averageHR") or values.get("avgHR"))
+    if average_hr is None:
+        average_hr = _average([point.heart_rate_bpm for point in points])
+    return average_hr is not None and average_hr < zones.easy_low
 
 
 def _classify_training(

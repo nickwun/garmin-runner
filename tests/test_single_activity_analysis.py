@@ -101,6 +101,34 @@ def test_heart_rate_drift_does_not_penalize_controlled_progression() -> None:
     assert abs(analysis.heart_rate_drift.drift_pct) < 1
 
 
+def test_low_intensity_active_slowdown_is_not_heart_rate_drift() -> None:
+    summary = {
+        "activityId": "active-slowdown",
+        "activityName": "福州市 跑步",
+        "startTimeLocal": "2026-08-29T06:19:57",
+        "distance": 11925.0,
+        "duration": 4500.0,
+        "averageHR": 128,
+        "maxHR": 136,
+    }
+    points = _points(
+        [
+            (0, 0, 125, 3.0),
+            (2250, 6300, 130, 2.8),
+            (4500, 11925, 128, 2.5),
+        ]
+    )
+
+    analysis = analyze_activity(summary, points, _training_config_from_image())
+
+    assert analysis.training_type == "E 跑"
+    assert analysis.pace_stability.late_slowdown_pct is not None
+    assert analysis.pace_stability.late_slowdown_pct > 5
+    assert analysis.heart_rate_drift.applicable is False
+    assert analysis.heart_rate_drift.drift_pct is None
+    assert "后半程明显降速" in (analysis.heart_rate_drift.reason or "")
+
+
 def test_analyze_activity_classifies_threshold_workout_and_scores_execution() -> None:
     summary = {
         "activityId": "67890",
