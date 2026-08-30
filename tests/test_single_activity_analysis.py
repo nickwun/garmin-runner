@@ -75,7 +75,7 @@ def test_analyze_activity_calculates_basic_metrics_zones_and_drift() -> None:
     assert analysis.heart_rate_drift.drift_pct > 0
 
 
-def test_heart_rate_drift_does_not_penalize_controlled_progression() -> None:
+def test_controlled_progression_does_not_use_whole_session_drift() -> None:
     summary = {
         "activityId": "controlled-progression",
         "activityName": "福州市 跑步",
@@ -96,9 +96,9 @@ def test_heart_rate_drift_does_not_penalize_controlled_progression() -> None:
 
     analysis = analyze_activity(summary, points, _training_config_from_image())
 
-    assert analysis.heart_rate_drift.label == "稳定"
-    assert analysis.heart_rate_drift.drift_pct is not None
-    assert abs(analysis.heart_rate_drift.drift_pct) < 1
+    assert analysis.heart_rate_drift.applicable is False
+    assert analysis.heart_rate_drift.drift_pct is None
+    assert "后半程明显提速" in (analysis.heart_rate_drift.reason or "")
 
 
 def test_low_intensity_active_slowdown_is_not_heart_rate_drift() -> None:
@@ -127,6 +127,33 @@ def test_low_intensity_active_slowdown_is_not_heart_rate_drift() -> None:
     assert analysis.heart_rate_drift.applicable is False
     assert analysis.heart_rate_drift.drift_pct is None
     assert "后半程明显降速" in (analysis.heart_rate_drift.reason or "")
+
+
+def test_progressive_long_run_guidance_does_not_claim_heart_rate_drift() -> None:
+    summary = {
+        "activityId": "progressive-long",
+        "activityName": "福州市 跑步",
+        "startTimeLocal": "2026-08-30T05:08:06",
+        "distance": 27000.0,
+        "duration": 8400.0,
+        "averageHR": 146,
+        "maxHR": 167,
+    }
+    points = _points(
+        [
+            (0, 0, 130, 2.8),
+            (4200, 11760, 145, 2.8),
+            (8400, 27000, 160, 3.63),
+        ]
+    )
+
+    analysis = analyze_activity(summary, points, _training_config_from_image())
+
+    assert analysis.training_type == "长距离"
+    assert analysis.heart_rate_drift.applicable is False
+    assert "提速" in (analysis.heart_rate_drift.reason or "")
+    assert "误判为漂移" in analysis.guidance.prohibited
+    assert "不要忽视后半程心率漂移" not in analysis.guidance.prohibited
 
 
 def test_analyze_activity_classifies_threshold_workout_and_scores_execution() -> None:

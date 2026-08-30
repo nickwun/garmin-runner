@@ -301,6 +301,12 @@ def _heart_rate_drift(
     if _drift_not_applicable(summary, training_type, pace_stability):
         reason = "间歇课、比赛或明显变速课不使用全程前后半心率漂移判断"
         return HeartRateDrift(None, None, None, "不适用", applicable=False, reason=reason)
+    if (
+        pace_stability.late_slowdown_pct is not None
+        and pace_stability.late_slowdown_pct <= -5
+    ):
+        reason = "后半程明显提速，前后强度不一致，不使用全程 pace/hr 判断心率漂移"
+        return HeartRateDrift(None, None, None, "不适用", applicable=False, reason=reason)
     if _low_intensity_slowdown_invalidates_drift(
         summary, points, training_type, pace_stability, zones
     ):
@@ -525,7 +531,12 @@ def _training_guidance(
     elif training_type == "长距离":
         tomorrow = "优先休息或 30-40 分钟恢复跑。"
         future = "未来 48-72 小时关注睡眠、补给和腿部恢复，再决定是否恢复节奏训练。"
-        prohibited = "不要在恢复不足时安排阈值课；不要忽视后半程心率漂移和配速掉速。"
+        if not drift.applicable and drift.reason and "提速" in drift.reason:
+            prohibited = "不要把渐进提速后的心率上升误判为漂移；不要在恢复不足时安排阈值课。"
+        elif not drift.applicable:
+            prohibited = "不要用全程前后半漂移评价明显变速的长距离；不要在恢复不足时安排阈值课。"
+        else:
+            prohibited = "不要在恢复不足时安排阈值课；关注后半程心率、配速和动作变化。"
     elif training_type == "比赛":
         tomorrow = "赛后优先恢复，至少安排休息或极轻松活动。"
         future = "未来 48-72 小时只看恢复，不急于恢复训练计划。"
