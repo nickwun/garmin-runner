@@ -19,7 +19,15 @@ def render_monthly_report(analysis: MonthlyAnalysis) -> str:
         + f"{week.label}（{week.week_start.isoformat()} 至 {week.week_end.isoformat()}）："
         + f"{week.distance_km:.1f} km，{_format_duration(week.duration_s)}，"
         + f"高强度 {week.high_intensity_count} 次，"
-        + ("减量周" if week.is_deload else "过载周" if week.is_overload else "常规周")
+        + (
+            "无训练"
+            if week.distance_km == 0
+            else "减量周"
+            if week.is_deload
+            else "过载周"
+            if week.is_overload
+            else "常规周"
+        )
         for week in analysis.weekly_distribution
     )
     prohibited = "\n".join(f"- {item}" for item in analysis.next_month.prohibited)

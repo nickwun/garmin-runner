@@ -88,6 +88,39 @@ def test_monthly_report_identifies_deload_week() -> None:
     assert any(item.is_deload for item in analysis.weekly_distribution)
 
 
+def test_monthly_report_ignores_partial_weeks_for_deload_detection() -> None:
+    analysis = analyze_month(
+        MonthlyContext(
+            month_start=date(2026, 8, 1),
+            month_end=date(2026, 8, 31),
+            activities=[
+                _activity("partial", date(2026, 8, 2), 30, 10800, "长距离"),
+                _activity("full-week", date(2026, 8, 4), 91, 32760, "E 跑"),
+            ],
+            structure=WeeklyTrainingStructure(normal_volume_min_km=100),
+        )
+    )
+
+    partial, full = analysis.weekly_distribution[:2]
+    assert partial.is_deload is False
+    assert full.is_deload is False
+
+
+def test_monthly_report_recognizes_ten_percent_recovery_week() -> None:
+    analysis = analyze_month(
+        MonthlyContext(
+            month_start=date(2026, 8, 1),
+            month_end=date(2026, 8, 31),
+            activities=[
+                _activity("recovery-week", date(2026, 8, 4), 88, 31680, "E 跑"),
+            ],
+            structure=WeeklyTrainingStructure(normal_volume_min_km=100),
+        )
+    )
+
+    assert analysis.weekly_distribution[1].is_deload is True
+
+
 def test_monthly_report_flags_overload_risk() -> None:
     analysis = analyze_month(
         MonthlyContext(
@@ -107,6 +140,54 @@ def test_monthly_report_flags_overload_risk() -> None:
 
     assert analysis.conclusion == "过载风险"
     assert "强度堆积" in analysis.fatigue.intensity_stack
+
+
+def test_monthly_report_does_not_treat_one_quality_session_per_week_as_stacking() -> None:
+    activities = []
+    for index, day in enumerate((4, 11, 18, 25), start=1):
+        activities.append(
+            _activity(
+                f"quality-{index}",
+                date(2026, 8, day),
+                16,
+                5400,
+                "阈值间歇",
+                8,
+                1920,
+            )
+        )
+        activities.append(
+            _activity(f"easy-{index}", date(2026, 8, day + 1), 14, 5100, "E 跑")
+        )
+
+    analysis = analyze_month(
+        MonthlyContext(
+            month_start=date(2026, 8, 1),
+            month_end=date(2026, 8, 31),
+            activities=activities,
+            structure=WeeklyTrainingStructure(rest_day="monday"),
+        )
+    )
+
+    assert analysis.fatigue.intensity_stack == "强度分布可控"
+    assert analysis.fatigue.rest == "固定休息日执行良好"
+    assert analysis.conclusion != "过载风险"
+
+
+def test_monthly_report_flags_training_on_scheduled_rest_day() -> None:
+    analysis = analyze_month(
+        MonthlyContext(
+            month_start=date(2026, 8, 1),
+            month_end=date(2026, 8, 31),
+            activities=[
+                _activity("monday-run", date(2026, 8, 3), 10, 3600, "E 跑"),
+            ],
+            structure=WeeklyTrainingStructure(rest_day="monday"),
+        )
+    )
+
+    assert "休息不足" in analysis.fatigue.rest
+    assert "未落实 1 次" in analysis.fatigue.rest
 
 
 def test_monthly_report_calculates_training_trends() -> None:

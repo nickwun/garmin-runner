@@ -160,9 +160,15 @@ def _weekly_distribution(
         distance = round(sum(item.distance_km for item in in_week), 2)
         duration = sum(item.duration_s for item in in_week)
         high_count = sum(1 for item in in_week if item.training_type in HIGH_INTENSITY_TYPES)
-        is_deload = bool(in_week) and distance < context.structure.normal_volume_min_km * 0.65
+        is_complete_week = start >= context.month_start and end <= context.month_end
+        is_deload = (
+            is_complete_week
+            and bool(in_week)
+            and distance < context.structure.normal_volume_min_km * 0.9
+        )
         is_overload = (
-            distance > context.structure.normal_volume_max_km * 1.1 or high_count >= 3
+            is_complete_week
+            and (distance > context.structure.normal_volume_max_km * 1.1 or high_count >= 3)
         )
         iso = start.isocalendar()
         summaries.append(
@@ -326,10 +332,19 @@ def _monthly_fatigue(
         current > previous for previous, current in zip(distances, distances[1:])
     )
     overload_streak = _longest_streak([week.is_overload for week in non_empty])
-    high_count = sum(1 for item in activities if item.training_type in HIGH_INTENSITY_TYPES)
-    month_days = (context.month_end - context.month_start).days + 1
-    running_days = len({item.activity_date for item in activities})
-    rest_days = max(0, month_days - running_days)
+    quality_dates = sorted(
+        {
+            item.activity_date
+            for item in activities
+            if item.training_type in HIGH_INTENSITY_TYPES
+        }
+    )
+    short_quality_gap = any(
+        (current - previous).days <= 2
+        for previous, current in zip(quality_dates, quality_dates[1:])
+    )
+    overloaded_quality_week = any(week.high_intensity_count >= 2 for week in non_empty)
+    rest_violations = _scheduled_rest_day_violations(context, activities)
     return MonthlyFatigue(
         volume_trend=(
             "本月没有跑步记录"
@@ -340,14 +355,46 @@ def _monthly_fatigue(
         ),
         intensity_stack=(
             "强度堆积"
-            if high_count >= 4 or intensity.high_intensity_ratio > 0.22
+            if (
+                short_quality_gap
+                or overloaded_quality_week
+                or intensity.high_intensity_ratio > 0.22
+            )
             else "强度分布可控"
         ),
-        rest="休息不足" if rest_days < max(4, month_days // 5) else "休息基本够用",
+        rest=(
+            f"休息不足（固定休息日未落实 {rest_violations} 次）"
+            if rest_violations
+            else "固定休息日执行良好"
+        ),
         consecutive_overload=(
             f"连续 {overload_streak} 周过载" if overload_streak >= 2 else "未出现连续多周过载"
         ),
     )
+
+
+def _scheduled_rest_day_violations(
+    context: MonthlyContext,
+    activities: list[WeeklyActivity],
+) -> int:
+    weekday_offsets = {
+        "monday": 0,
+        "tuesday": 1,
+        "wednesday": 2,
+        "thursday": 3,
+        "friday": 4,
+        "saturday": 5,
+        "sunday": 6,
+    }
+    rest_weekday = weekday_offsets.get(context.structure.rest_day.lower(), 0)
+    running_dates = {item.activity_date for item in activities}
+    current = context.month_start
+    violations = 0
+    while current <= context.month_end:
+        if current.weekday() == rest_weekday and current in running_dates:
+            violations += 1
+        current += timedelta(days=1)
+    return violations
 
 
 def _monthly_conclusion(
