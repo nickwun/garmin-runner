@@ -22,8 +22,8 @@ class WeeklyTrainingStructure:
     tuesday_quality: bool = True
     friday_steady: bool = True
     weekend_long_run: bool = True
-    marathon_goal: str = "年底 2:45 全马目标"
-    b_race_note: str = "东营作为 B 赛测试，不全力"
+    marathon_goal: str = "12月27日福州马拉松全力冲击2:45"
+    b_race_note: str = "11月15日南昌马拉松争取刷新全马PB并测试实力"
 
 
 class WeeklyWorkoutPhaseRole(str, Enum):

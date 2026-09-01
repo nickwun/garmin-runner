@@ -124,8 +124,8 @@ def build_coach_prompt(request: CoachRequest) -> str:
 - 周五稳态
 - 周末长距离
 - 常态周跑量 100-120km
-- 福州马拉松 2:45 目标
-- 东营 B 赛测试，不全力
+- 主目标：{request.training_context.get("marathon_goal", "未配置")}
+- 阶段赛事：{request.training_context.get("b_race_note", "未配置")}
 
 本次任务：{request.title}
 

@@ -46,8 +46,8 @@ class TrainingSettings:
     tuesday_quality: bool = True
     friday_steady: bool = True
     weekend_long_run: bool = True
-    marathon_goal: str = "年底 2:45 全马目标"
-    b_race_note: str = "东营作为 B 赛测试，不全力"
+    marathon_goal: str = "12月27日福州马拉松全力冲击2:45"
+    b_race_note: str = "11月15日南昌马拉松争取刷新全马PB并测试实力"
 
 
 @dataclass(frozen=True)
@@ -148,10 +148,14 @@ def load_settings(config_path: Path = Path("config/athlete.yaml")) -> AppSetting
             friday_steady=_bool(weekly_structure_data.get("friday_steady", True)),
             weekend_long_run=_bool(weekly_structure_data.get("weekend_long_run", True)),
             marathon_goal=str(
-                weekly_structure_data.get("marathon_goal", "年底 2:45 全马目标")
+                weekly_structure_data.get(
+                    "marathon_goal", "12月27日福州马拉松全力冲击2:45"
+                )
             ),
             b_race_note=str(
-                weekly_structure_data.get("b_race_note", "东营作为 B 赛测试，不全力")
+                weekly_structure_data.get(
+                    "b_race_note", "11月15日南昌马拉松争取刷新全马PB并测试实力"
+                )
             ),
         ),
     )

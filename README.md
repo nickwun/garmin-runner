@@ -59,8 +59,8 @@ training:
     tuesday_quality: true
     friday_steady: true
     weekend_long_run: true
-    marathon_goal: "年底 2:45 全马目标"
-    b_race_note: "东营作为 B 赛测试，不全力"
+    marathon_goal: "12月27日福州马拉松全力冲击2:45"
+    b_race_note: "11月15日南昌马拉松争取刷新全马PB并测试实力"
 ```
 
 如果你的 Garmin Connect 是中国区账号（`https://connect.garmin.cn/`），请确认：
@@ -175,7 +175,7 @@ garmin-runner report weekly --since 2026-06-15 --until 2026-06-21
 reports/weekly/YYYY-Www.md
 ```
 
-周训练结构来自 `config/athlete.yaml` 的 `training.weekly_structure`，默认包含周一全休、周二强度、周五稳态、周末长距离、常态周跑量 100-120km、年底 2:45 全马目标，以及东营 B 赛测试说明。
+周训练结构来自 `config/athlete.yaml` 的 `training.weekly_structure`，默认包含周一全休、周二强度、周五稳态、周末长距离、常态周跑量 100-120km、11 月 15 日南昌马拉松争取刷新 PB 并测试实力，以及 12 月 27 日福州马拉松全力冲击 2:45。
 
 ## 生成月训练报告
 

@@ -454,7 +454,10 @@ def _goal_meaning(
     structure: WeeklyTrainingStructure,
 ) -> str:
     if conclusion == "过载风险":
-        return f"当前刺激对 {structure.marathon_goal} 有帮助但恢复风险偏高，东营测试前需要控强度。"
+        return (
+            f"当前刺激对 {structure.marathon_goal} 有帮助，但恢复风险偏高；"
+            f"结合阶段目标“{structure.b_race_note}”，近期需要控制强度。"
+        )
     if conclusion == "比赛月":
         return f"本月以比赛兑现或测试为主，需要结合 {structure.b_race_note} 复盘。"
     if intensity.long_run.distance_km > 0 and intensity.high_intensity.distance_km > 0:

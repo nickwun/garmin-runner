@@ -29,8 +29,8 @@ def test_prompt_builder_includes_background_goals_rules_and_json() -> None:
             "friday_steady": "周五稳态",
             "weekend_long_run": "周末长距离",
             "normal_weekly_volume": "100-120km",
-            "marathon_goal": "福州马拉松 2:45 目标",
-            "b_race_note": "东营 B 赛测试，不全力",
+            "marathon_goal": "12月27日福州马拉松全力冲击2:45",
+            "b_race_note": "11月15日南昌马拉松争取刷新全马PB并测试实力",
         },
     )
 
@@ -42,8 +42,8 @@ def test_prompt_builder_includes_background_goals_rules_and_json() -> None:
     assert "周五稳态" in prompt
     assert "周末长距离" in prompt
     assert "100-120km" in prompt
-    assert "福州马拉松 2:45 目标" in prompt
-    assert "东营 B 赛测试" in prompt
+    assert "12月27日福州马拉松全力冲击2:45" in prompt
+    assert "11月15日南昌马拉松争取刷新全马PB并测试实力" in prompt
     assert "不得编造数据" in prompt
     assert '"total_distance_km": 100' in prompt
     assert "训练判断" in prompt
@@ -89,7 +89,7 @@ def test_run_coach_uses_mock_client_and_writes_artifacts(tmp_path: Path) -> None
         title="2026-06 月训练",
         structured_data={"conclusion": "专项推进"},
         athlete_background="背景",
-        training_context={"marathon_goal": "福州马拉松 2:45 目标"},
+        training_context={"marathon_goal": "12月27日福州马拉松全力冲击2:45"},
     )
 
     result = run_coach(request, reports_dir=tmp_path, client=FakeClient())
