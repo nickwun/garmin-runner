@@ -328,6 +328,9 @@ def test_heart_rate_zone_time_ignores_long_pause_gaps() -> None:
     assert sum(analysis.hr_zones.seconds_by_zone.values()) == 120.0
     assert analysis.confidence.level == "medium"
     assert any("暂停" in reason for reason in analysis.confidence.reasons)
+    assert analysis.heart_rate_drift.applicable is False
+    assert analysis.heart_rate_drift.drift_pct is None
+    assert "暂停或跑停" in (analysis.heart_rate_drift.reason or "")
 
 
 def test_heart_rate_drift_is_not_applicable_for_interval_workouts() -> None:

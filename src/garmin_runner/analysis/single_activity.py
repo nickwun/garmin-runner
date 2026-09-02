@@ -298,6 +298,11 @@ def _heart_rate_drift(
     pace_stability: PaceStability,
     zones: HeartRateZones,
 ) -> HeartRateDrift:
+    values = _summary_values(summary)
+    duration_s = _number(values.get("duration"))
+    if _has_obvious_pause(points, duration_s):
+        reason = "存在明显暂停或跑停变化，前后强度不连续，不使用全程 pace/hr 判断心率漂移"
+        return HeartRateDrift(None, None, None, "不适用", applicable=False, reason=reason)
     if _drift_not_applicable(summary, training_type, pace_stability):
         reason = "间歇课、比赛或明显变速课不使用全程前后半心率漂移判断"
         return HeartRateDrift(None, None, None, "不适用", applicable=False, reason=reason)
