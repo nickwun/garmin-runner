@@ -305,6 +305,26 @@ def test_long_run_uses_distance_and_duration_thresholds_together() -> None:
     assert analysis.training_type == "长距离"
 
 
+def test_very_low_heart_rate_run_is_recovery_even_when_longer_than_eight_km() -> None:
+    summary = {
+        "activityId": "low-heart-rate-recovery",
+        "activityName": "福州市 跑步",
+        "startTimeLocal": "2026-09-05T06:02:55",
+        "distance": 12000.0,
+        "duration": 4500.0,
+        "averageHR": 118,
+        "maxHR": 133,
+    }
+
+    analysis = analyze_activity(
+        summary,
+        _steady_points(distance_m=12000.0, duration_s=4500.0, heart_rate=118),
+        _training_config_from_image(),
+    )
+
+    assert analysis.training_type == "恢复跑"
+
+
 def test_heart_rate_zone_time_ignores_long_pause_gaps() -> None:
     summary = {
         "activityId": "pause-gap",

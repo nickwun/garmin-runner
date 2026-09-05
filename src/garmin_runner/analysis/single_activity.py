@@ -398,6 +398,8 @@ def _classify_training(
             return "轻松跑跑成质量课"
         if "maf" in name and avg_hr <= config.heart_rate_zones.easy_high:
             return "MAF 跑"
+        if avg_hr < config.heart_rate_zones.maf_low:
+            return "恢复跑"
         if avg_hr < config.heart_rate_zones.easy_low:
             return "恢复跑" if distance <= 8 and duration <= 45 * 60 else "E 跑"
         if avg_hr <= config.heart_rate_zones.easy_high:
