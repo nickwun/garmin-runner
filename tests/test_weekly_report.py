@@ -80,6 +80,54 @@ def test_weekly_activity_conversion_preserves_start_time_and_non_overlapping_pha
     assert converted.intensity_duration_s == 2400.0
 
 
+def test_weekly_activity_conversion_does_not_overwrite_existing_daily_report(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    summary_path = tmp_path / "summary.json"
+    fit_path = tmp_path / "activity.fit"
+    summary_path.write_text("{}", encoding="utf-8")
+    fit_path.write_bytes(b"fit")
+    analysis = SimpleNamespace(
+        basic=SimpleNamespace(
+            activity_id="123",
+            activity_date=date(2026, 6, 19),
+            activity_name="校准后的训练",
+            distance_km=12.0,
+            duration_s=3600.0,
+            average_hr=132.0,
+        ),
+        training_type="E 跑",
+        execution_score=100,
+        workout_breakdown=None,
+    )
+    report_path = tmp_path / "reports" / "daily" / "2026-06-19_123.md"
+    report_path.parent.mkdir(parents=True)
+    report_path.write_text("人工校准内容", encoding="utf-8")
+    monkeypatch.setattr(cli, "decode_fit_messages", lambda path: ({}, []))
+    monkeypatch.setattr(cli, "extract_time_series", lambda messages: [])
+    monkeypatch.setattr(cli, "analyze_activity", lambda summary, points, config: analysis)
+
+    def fail_if_called(result: object, reports_dir: Path) -> Path:
+        raise AssertionError("周报生成不应覆盖已存在的日报")
+
+    monkeypatch.setattr(cli, "write_daily_report", fail_if_called)
+
+    converted = cli._weekly_activity_from_row(
+        {
+            "activity_id": "123",
+            "start_time_local": "2026-06-19T06:10:00",
+            "summary_path": str(summary_path),
+            "fit_path": str(fit_path),
+        },
+        tmp_path / "reports",
+        object(),
+    )
+
+    assert converted.report_path == report_path
+    assert report_path.read_text(encoding="utf-8") == "人工校准内容"
+
+
 def test_weekly_workout_phase_conversion_omits_non_finite_zero_and_missing_values() -> None:
     breakdown = WorkoutBreakdown(
         warmup=WorkoutPhase("热身", float("nan"), 1200.0, None),
@@ -1081,6 +1129,33 @@ def test_weekly_report_handles_empty_week() -> None:
     assert analysis.total_distance_km == 0
     assert analysis.running_days == 0
     assert any("本周没有跑步记录" in signal for signal in analysis.risk_signals)
+
+
+def test_weekly_report_identifies_planned_deload_below_normal_volume() -> None:
+    analysis = analyze_week(
+        WeeklyContext(
+            week_start=date(2026, 9, 7),
+            week_end=date(2026, 9, 13),
+            activities=[
+                _activity("quality", date(2026, 9, 8), 15, 4800, "阈值间歇"),
+                _activity("easy-1", date(2026, 9, 9), 12, 4200, "E 跑"),
+                _activity("easy-2", date(2026, 9, 10), 12, 4000, "E 跑"),
+                _activity("steady", date(2026, 9, 11), 12, 3700, "稳态跑"),
+                _activity("easy-3", date(2026, 9, 12), 12, 4000, "E 跑"),
+                _activity("long", date(2026, 9, 13), 22, 7000, "长距离"),
+            ],
+            previous_week_distance_km=102,
+            recent_4w_avg_distance_km=103,
+            structure=WeeklyTrainingStructure(
+                normal_volume_min_km=100,
+                normal_volume_max_km=120,
+            ),
+        )
+    )
+
+    assert analysis.total_distance_km == 85
+    assert analysis.conclusion == "减量周"
+    assert analysis.next_week.direction == "谨慎加量"
 
 
 def test_weekly_report_missing_config_is_clear(tmp_path: Path) -> None:

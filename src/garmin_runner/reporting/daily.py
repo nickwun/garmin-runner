@@ -19,13 +19,19 @@ ZONE_LABELS = {
 
 
 def write_daily_report(analysis: SingleActivityAnalysis, reports_dir: Path) -> Path:
-    activity_date = analysis.basic.activity_date.isoformat()
-    activity_id = analysis.basic.activity_id
-    output_dir = Path(reports_dir) / "daily"
-    output_dir.mkdir(parents=True, exist_ok=True)
-    path = output_dir / f"{activity_date}_{activity_id}.md"
+    path = daily_report_path(analysis, reports_dir)
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(render_daily_report(analysis), encoding="utf-8")
     return path
+
+
+def daily_report_path(
+    analysis: SingleActivityAnalysis,
+    reports_dir: Path,
+) -> Path:
+    activity_date = analysis.basic.activity_date.isoformat()
+    activity_id = analysis.basic.activity_id
+    return Path(reports_dir) / "daily" / f"{activity_date}_{activity_id}.md"
 
 
 def render_daily_report(analysis: SingleActivityAnalysis) -> str:

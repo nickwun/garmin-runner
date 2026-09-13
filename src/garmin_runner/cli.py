@@ -42,7 +42,7 @@ from garmin_runner.analysis.weekly import (
 from garmin_runner.config import load_settings
 from garmin_runner.fit import decode_fit_messages, extract_time_series, record_messages
 from garmin_runner.garmin_client import GarminRunnerLoginError, create_garmin_client
-from garmin_runner.reporting.daily import write_daily_report
+from garmin_runner.reporting.daily import daily_report_path, write_daily_report
 from garmin_runner.reporting.monthly import write_monthly_report
 from garmin_runner.reporting.weekly import write_weekly_report
 from garmin_runner.storage import ActivityStore
@@ -734,7 +734,9 @@ def _weekly_activity_from_row(
         if laps
         else analyze_activity(summary, points, training_config)
     )
-    report_path = write_daily_report(analysis, reports_dir)
+    report_path = daily_report_path(analysis, reports_dir)
+    if not report_path.exists():
+        report_path = write_daily_report(analysis, reports_dir)
     intensity_distance = None
     intensity_duration = None
     if analysis.workout_breakdown is not None:

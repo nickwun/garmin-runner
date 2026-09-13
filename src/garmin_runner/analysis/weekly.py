@@ -598,6 +598,21 @@ def _conclusion(
         return "恢复不足"
     if total_distance < context.structure.normal_volume_min_km * 0.65:
         return "减量周"
+    baselines = (
+        context.previous_week_distance_km,
+        context.recent_4w_avg_distance_km,
+    )
+    reduced_from_baseline = any(
+        baseline is not None
+        and baseline > 0
+        and total_distance <= baseline * 0.9
+        for baseline in baselines
+    )
+    if (
+        total_distance < context.structure.normal_volume_min_km * 0.9
+        and reduced_from_baseline
+    ):
+        return "减量周"
     if high_count >= 1 and long_run_distance > 0:
         return "有效刺激"
     return "稳定积累"
