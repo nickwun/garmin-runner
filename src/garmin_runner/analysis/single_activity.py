@@ -300,7 +300,12 @@ def _heart_rate_drift(
 ) -> HeartRateDrift:
     values = _summary_values(summary)
     duration_s = _number(values.get("duration"))
-    if _has_obvious_pause(points, duration_s):
+    moving_duration_s = _number(
+        values.get("movingDuration")
+        or values.get("moving_duration")
+        or values.get("movingDurationInSeconds")
+    )
+    if _has_obvious_pause(points, duration_s, moving_duration_s):
         reason = "存在明显暂停或跑停变化，前后强度不连续，不使用全程 pace/hr 判断心率漂移"
         return HeartRateDrift(None, None, None, "不适用", applicable=False, reason=reason)
     if _drift_not_applicable(summary, training_type, pace_stability):
@@ -977,7 +982,17 @@ def _is_pause_gap(duration: float, distance: float) -> bool:
     return duration > PAUSE_GAP_SECONDS and distance <= PAUSE_GAP_MAX_DISTANCE_M
 
 
-def _has_obvious_pause(points: list[TimeSeriesPoint], duration_s: float | None) -> bool:
+def _has_obvious_pause(
+    points: list[TimeSeriesPoint],
+    duration_s: float | None,
+    moving_duration_s: float | None = None,
+) -> bool:
+    if (
+        duration_s is not None
+        and moving_duration_s is not None
+        and duration_s - moving_duration_s > 60
+    ):
+        return True
     raw_elapsed = _duration_from_points(points)
     if duration_s is not None and raw_elapsed is not None and raw_elapsed - duration_s > 60:
         return True
@@ -1010,7 +1025,7 @@ def _analysis_confidence(
     if len(points) < 60 and (basic.duration_s or 0) >= 600:
         reasons.append("FIT records 太少，无法稳定判断训练过程")
         penalty += 2
-    if _has_obvious_pause(points, basic.duration_s):
+    if _has_obvious_pause(points, basic.duration_s, basic.moving_duration_s):
         reasons.append("FIT 中存在明显暂停或长时间 gap，已过滤暂停段")
         penalty += 1
     if _drift_not_applicable(summary, training_type, pace_stability):

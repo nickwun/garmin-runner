@@ -353,6 +353,35 @@ def test_heart_rate_zone_time_ignores_long_pause_gaps() -> None:
     assert "暂停或跑停" in (analysis.heart_rate_drift.reason or "")
 
 
+def test_moving_duration_gap_marks_auto_paused_run_drift_not_applicable() -> None:
+    summary = {
+        "activityId": "auto-pause",
+        "activityName": "拍摄与补给恢复跑",
+        "startTimeLocal": "2026-09-16T05:46:53",
+        "distance": 2000.0,
+        "duration": 600.0,
+        "movingDuration": 480.0,
+        "averageHR": 128,
+    }
+
+    analysis = analyze_activity(
+        summary,
+        _points(
+            [
+                (i * 10, i * (2000.0 / 60), 128, 2000.0 / 600)
+                for i in range(61)
+            ]
+        ),
+        _training_config_from_image(),
+    )
+
+    assert analysis.confidence.level == "medium"
+    assert any("暂停" in reason for reason in analysis.confidence.reasons)
+    assert analysis.heart_rate_drift.applicable is False
+    assert analysis.heart_rate_drift.drift_pct is None
+    assert "暂停或跑停" in (analysis.heart_rate_drift.reason or "")
+
+
 def test_heart_rate_drift_is_not_applicable_for_interval_workouts() -> None:
     summary = {
         "activityId": "interval",
