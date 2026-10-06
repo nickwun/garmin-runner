@@ -270,6 +270,79 @@ FIT 缺失：
 Garmin 字段变化：
 如果 summary 或 FIT 字段变化，`inspect` 会列出当前可用字段和明显缺失字段，便于定位解析问题。
 
+## 恢复数据与决策（第一阶段）
+
+继续使用现有中国区配置和本地凭证，不需要第二套 Garmin 登录。
+
+```bash
+garmin-runner health doctor
+garmin-runner health sync --days 56
+garmin-runner feedback --date today
+garmin-runner report readiness --date today
+```
+
+- `health doctor` 实际请求最近七天的 HRV、睡眠、静息心率、压力、身体电量和可选训练准备度，保存本地响应并输出 PASS/WARN/FAIL。空数据不等于设备不支持；403、404、网络及结构变化分别作为请求失败处理。
+- `health sync` 支持 `--until YYYY-MM-DD` 和 `--refresh`；最近七天及当日会刷新，较早的成功日期跳过，缺失或失败项可重试。遇到限流或认证失效立即停止，不密集重试。CLI 只打印可用性，不输出原始健康响应或异常正文。
+- 首次建立健康表前通过 SQLite backup 备份到本地 `data/backups/`。健康响应按日期、来源及内容哈希保存在 `data/raw/health/`；成功历史版本不删除，失败状态不会覆盖成功数据。文件和数据库使用仅当前用户可读写的权限。
+- 体感反馈追加保存，留空仍是未知，不改写原话。可使用 `feedback --non-interactive --date YYYY-MM-DD --fatigue 4 --legs 5 --pain no --plan easy --note "体感原话"`。疲劳与腿沉为 0-10；睡眠感受使用 `--sleep-feeling good/poor/unknown`。补录历史反馈不会被伪装成当时已经知道的信息。
+- 也支持自然描述的明确结构化项：`--completed --effort easy --leg-feeling normal --soreness mild` 表示已跑完、体感轻松、腿不沉、轻微酸痛。不会自动换算成数字疲劳分，也不把轻微酸痛等同于其他疼痛；已完成训练的报告只做恢复复盘，不补发跑前许可。
+- 报告保存为 `reports/readiness/YYYY-MM-DD.md` 和同名 JSON，CLI 提供绝对路径快捷链接。JSON 包含阈值、参考样本数、来源和同步状态。相同日期重新生成只更新派生报告，原始数据与反馈不受影响。
+
+历史回放示例：
+
+```bash
+garmin-runner report readiness --date 2026-09-22 --at 05:00
+```
+
+历史日期默认截止当地 07:00；当日默认当前时点，可用 `--at HH:MM` 指定。日期使用 `athlete.timezone`。睡眠按醒来日期关联，晚于截止的观测和反馈不参与计算；事后取得的当日静息心率/压力汇总不用于跑前判断，身体电量与准备度仅取截止前的采样。历史补采明确标为“事后回放”，不能证明当时已同步可见。时点前已有跑步记录时，不补发跑前执行许可。
+
+规则使用 `recovery` 配置（见示例 YAML）：过去 28 天至少 21 天数据形成睡眠/静息心率个人中位数参考；默认连续 2 天偏离才构成持续变化，静息心率偏高阈值 5 bpm、睡眠减少阈值 1 小时，当前观测及反馈新鲜度上限 6 小时。以上均为可校准工程启发式，不是医学标准。
+
+HRV 用 Garmin 的 7 日均值对照其个人基线，不能直接把该区间套在单晚值上；单晚变化不单独取消训练。固定全休日仍全休；明确腿沉或疲劳不会被低心率/平衡 HRV 抵消；证据不足不批准加量。身体电量、压力和准备度仅作为参考，不与 HRV 重复加权生成黑箱总分。不使用 LLM 计算或诊断。
+
+验收报告位于 `reports/validation/health_doctor.md` 与 `health_sync.md`。所有健康数据、备份、反馈及报告都留在本地，不提交 Git。本地看板和 MCP 属于后续阶段，当前没有提供这些命令。
+
+## 同类训练对比（第二阶段）
+
+```bash
+garmin-runner compare ACTIVITY_ID --days 90 --limit 5
+garmin-runner compare ACTIVITY_ID --against HISTORY_ACTIVITY_ID --days 365
+```
+
+只读取本地 SQLite、summary 和 FIT，不联网、不改写活动、不覆盖单次报告。输出 `reports/comparison/YYYY-MM-DD_ACTIVITY_ID.md` 和同名 JSON，命令输出可点击绝对路径。缺少数据库、FIT 或无可比样本均给出中文说明；没有历史数据时不会创建空数据库。
+
+- **条件相近**：类型一致、所选段距离差不超过 20%、平均心率差不超过 5 bpm、气温差不超过 3℃、湿度差不超过 10 个百分点，且路线、路面、心率来源一致，每公里爬升差不超过 5m。仍是观察性比较，不是严格对照实验。
+- **仅供参考**：天气、路线或心率来源缺失，明显跑停、条件差异较大，或主训练段只是自动估计。缺失不是相同，不使用天气校正公式，不直接下进步/退步结论。
+- **排除**：类型/距离不匹配、关键 FIT 字段覆盖不足、比赛或孤立热身冷身。重复记录按精确活动签名排除但保留原始记录。只选择目标当地日期之前的活动，不混入同日热身冷身和未来记录。
+- 配速、心率均由所选 FIT 距离段积分，心率按时间加权；关键心率与距离覆盖至少 90%，有效记录至少 60。timer、elapsed、moving 三种时间单列，不混用。
+- 优先按 FIT `intensity` 圈标记拆分主训练，将连续 active 公里圈合并为一个工作组；间歇比较组数、单组距离及组间恢复时长（差超过 15 秒降级）。缺少快段结构时，不计算包含恢复段的全程配速差来评价间歇质量。
+- 连续跑显示主段配速 CV、前后半掉速与速度/心率效率变化。间歇、比赛、明显变速、计划渐进、明显暂停、关键字段不足及不足 20 分钟的段不输出生理漂移结论。热身冷身不混入明确主段。
+- 至少 3 个条件相近样本才汇总配速差中位数，仍不把表现差异直接解释为能力或恢复变化。慢跑更慢不扣分，也不会因为更快给高分。
+
+可选校准保存在私有 `data/comparison_context.json`，不存在时正常运行，缺失条件降级。也可用 `--context PATH` 指定。下例仅为虚构格式示例，不是运动员数据：
+
+```json
+{
+  "version": 1,
+  "activities": {
+    "example-activity": {
+      "training_type": "阈值间歇",
+      "work_ranges_km": [[3, 5], [5.4, 7.4]],
+      "temperature_c": 23,
+      "humidity_pct": 80,
+      "weather_source": "用户现场记录",
+      "route": "训练场A",
+      "surface": "塑胶",
+      "hr_source": "心率带",
+      "note": "用户提供的体感原话",
+      "session_activity_ids": ["warmup-id", "cooldown-id"]
+    }
+  }
+}
+```
+
+连续主段用 `main_range_km: [3, 11]`，与 `work_ranges_km` 互斥；范围是活动累计公里数。`variable_effort: true` 表示明确计划渐进/变速。天气必须带来源，不将 FIT 腕表温度冒充环境温度；不自动从自由文本猜测条件。关联活动必须存在且同日，仅共同解释训练，不改变主段对比。未填写数字疲劳分时不自动换算。
+
 ## 开发
 
 运行测试：
@@ -282,6 +355,9 @@ pytest
 
 - SQLite activity 写入。
 - 重复 `activity_id` 去重，且不覆盖已有记录。
+- 健康数据规范化、SQLite 备份与幂等、错误脱敏、限流停止。
+- 恢复判断、反馈保真、缺失/过期数据、历史回放的时间边界与原始活动副本排除。
+- 同类对比条件分档、FIT 圈段合并、主段积分、间歇结构匹配、暂停与缺失字段、只读及隐私边界。
 
 ## 结构
 
@@ -294,6 +370,10 @@ src/garmin_runner/
   normalize.py       # Garmin summary -> 标准化记录
   storage.py         # SQLite 存储
   sync.py            # 同步编排
+  health.py          # 健康数据规范化与同步
+  health_storage.py  # 健康版本、请求状态与反馈
+  health_cli.py      # health/feedback/readiness 命令
+  comparison_cli.py  # 本地同类训练对比命令
   analysis/          # 确定性训练分析
   reporting/         # 中文 Markdown 报告
 ```

@@ -4,6 +4,7 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import yaml
 from dotenv import load_dotenv
@@ -51,10 +52,22 @@ class TrainingSettings:
 
 
 @dataclass(frozen=True)
+class RecoverySettings:
+    timezone: str = "Asia/Shanghai"
+    baseline_days: int = 28
+    min_baseline_days: int = 21
+    elevated_rhr_bpm: float = 5.0
+    sleep_deficit_hours: float = 1.0
+    consecutive_days: int = 2
+    fresh_hours: float = 6.0
+
+
+@dataclass(frozen=True)
 class AppSettings:
     garmin: GarminSettings
     storage: StorageSettings
     training: TrainingSettings
+    recovery: RecoverySettings = RecoverySettings()
 
 
 def _path(value: str | Path) -> Path:
@@ -76,6 +89,27 @@ def load_settings(config_path: Path = Path("config/athlete.yaml")) -> AppSetting
     training_data = data.get("training", {})
     hr_zones_data = training_data.get("heart_rate_zones", {})
     weekly_structure_data = training_data.get("weekly_structure", {})
+    recovery_data = data.get("recovery", {})
+    recovery = RecoverySettings(
+        timezone=str(data.get("athlete", {}).get("timezone", "Asia/Shanghai")),
+        baseline_days=int(recovery_data.get("baseline_days", 28)),
+        min_baseline_days=int(recovery_data.get("min_baseline_days", 21)),
+        elevated_rhr_bpm=float(recovery_data.get("elevated_rhr_bpm", 5)),
+        sleep_deficit_hours=float(recovery_data.get("sleep_deficit_hours", 1)),
+        consecutive_days=int(recovery_data.get("consecutive_days", 2)),
+        fresh_hours=float(recovery_data.get("fresh_hours", 6)),
+    )
+    try:
+        ZoneInfo(recovery.timezone)
+    except ZoneInfoNotFoundError:
+        raise ValueError("athlete.timezone 必须是有效时区，例如 Asia/Shanghai。") from None
+    if not (2 <= recovery.min_baseline_days <= recovery.baseline_days <= 365):
+        raise ValueError("恢复基线需要满足 2 <= min_baseline_days <= baseline_days <= 365。")
+    if not (2 <= recovery.consecutive_days <= 7):
+        raise ValueError("consecutive_days 必须为 2-7 天。")
+    if not (0 < recovery.elevated_rhr_bpm <= 30 and 0 < recovery.sleep_deficit_hours <= 12
+            and 0 < recovery.fresh_hours <= 24):
+        raise ValueError("恢复阈值必须为合理的正数。")
     new_zone_keys = {
         "recovery_low",
         "recovery_high",
@@ -89,6 +123,7 @@ def load_settings(config_path: Path = Path("config/athlete.yaml")) -> AppSetting
     uses_new_zone_schema = any(key in hr_zones_data for key in new_zone_keys)
 
     return AppSettings(
+        recovery=recovery,
         garmin=GarminSettings(
             email_env=str(garmin_data.get("email_env", "GARMIN_EMAIL")),
             password_env=str(garmin_data.get("password_env", "GARMIN_PASSWORD")),

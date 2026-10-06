@@ -47,12 +47,16 @@ from garmin_runner.reporting.monthly import write_monthly_report
 from garmin_runner.reporting.weekly import write_weekly_report
 from garmin_runner.storage import ActivityStore
 from garmin_runner.sync import sync_running_activities
+from garmin_runner.health_cli import register_health_commands
+from garmin_runner.comparison_cli import register_comparison_commands
 
 app = typer.Typer(help="Local-first Garmin running data sync and analysis toolkit.")
 report_app = typer.Typer(help="Generate deterministic training reports.")
 coach_app = typer.Typer(help="Generate optional Codex coaching summaries.")
 app.add_typer(report_app, name="report")
 app.add_typer(coach_app, name="coach")
+register_health_commands(app, report_app)
+register_comparison_commands(app)
 
 
 @app.callback()

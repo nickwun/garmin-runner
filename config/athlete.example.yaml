@@ -20,6 +20,15 @@ storage:
   fit_dir: "data/raw/fit"
   reports_dir: "reports"
 
+# Engineering heuristics, not medical thresholds. Missing values remain unknown.
+recovery:
+  baseline_days: 28
+  min_baseline_days: 21
+  elevated_rhr_bpm: 5
+  sleep_deficit_hours: 1
+  consecutive_days: 2
+  fresh_hours: 6
+
 training:
   # 按你的个人情况填写。第一版规则引擎只使用这些确定性区间，不调用 LLM。
   heart_rate_zones:
