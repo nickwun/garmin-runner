@@ -14,12 +14,16 @@
 @media(max-width:680px){.toolbar{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}.toolbar .range-note,.toolbar .error{grid-column:1/-1}}
 @media print{.sidebar,.toolbar,.filters,.pager,.reader-top{display:none!important}.shell{display:block}main{padding:0}.status{background:white}.canvas-wrap{height:200px}}
 </style>
+<style>
+.plan-targets{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:24px}.plan-target{padding:12px 0;border-bottom:1px solid var(--line);line-height:1.8;overflow-wrap:anywhere}.plan-target strong{font-size:18px}.plan-table td{min-width:90px}.plan-table td:nth-child(3){min-width:190px}.plan-table td:last-child{min-width:110px}
+@media(max-width:680px){.navigation{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:4px}.navigation button{min-height:40px}.plan-targets{grid-template-columns:1fr;gap:12px}}
+</style>
 </head>
 <body>
 <noscript>此离线看板需要浏览器启用 JavaScript。原始 Markdown 报告仍可单独查看。</noscript>
 <div class="shell">
 <aside class="sidebar"><div class="brand">garmin-runner<small>本地训练记录</small></div>
-<nav class="navigation" aria-label="主导航"><button data-view="overview" aria-current="page">训练概览</button><button data-view="activities">训练记录</button><button data-view="health">恢复趋势</button><button data-view="reports">报告库</button></nav>
+<nav class="navigation" aria-label="主导航"><button data-view="overview" aria-current="page">训练概览</button><button data-view="planning">课表计划</button><button data-view="activities">训练记录</button><button data-view="health">恢复趋势</button><button data-view="reports">报告库</button><button data-view="knowledge">知识库</button></nav>
 <footer>LOCAL / PRIVATE<br>本地快照 · 未连接云服务<br><span id="sidebar-period"></span></footer></aside>
 <main>
 <header class="topline"><span class="eyebrow">TRAINING JOURNAL</span><span class="snapshot" id="snapshot"></span></header>
@@ -30,6 +34,7 @@
 <section id="overview" class="tab-content">
 <div class="status" id="day-notes" hidden></div>
 <div class="metrics"><div class="metric"><span>已同步跑量</span><strong id="volume">未知</strong><small id="volume-detail"></small></div><div class="metric"><span>活动计时时长</span><strong id="duration">未知</strong><small>Garmin timer，不含未记录活动</small></div><div class="metric"><span>有跑步记录的天数</span><strong id="run-days">未知</strong><small id="missing-days"></small></div><div class="metric"><span>核心健康数据覆盖</span><strong id="health-days">未知</strong><small>HRV、睡眠、静息心率同时有值</small></div></div>
+<section class="section"><div class="section-heading"><h2>接下来一周</h2><button class="quiet" data-view="planning">训练课表和训练计划</button></div><div id="planning-preview" class="table-wrap"></div></section>
 <section class="section"><div class="section-heading"><h2>最近恢复记录</h2><span id="recovery-date" class="meta"></span></div><div id="recovery" class="recovery-strip"></div></section>
 <section class="section charts"><div class="plot"><h3>每日已同步跑量 <span class="meta">km</span></h3><div class="canvas-wrap"><canvas id="volume-chart" aria-label="每日跑量趋势" role="img"></canvas></div><p class="plot-note" id="volume-hint">无记录的日期留空，不算作休息。</p></div><div class="plot"><h3>HRV 7 日均值 <span class="meta">ms</span></h3><div class="canvas-wrap"><canvas id="hrv-chart" aria-label="HRV 与 Garmin 基线趋势" role="img"></canvas></div><p class="plot-note" id="hrv-hint">浅绿区域为个人 Garmin 基线；缺失值不连线。</p></div></section>
 <section class="section"><div class="section-heading"><h2>最近训练</h2><button class="quiet" data-view="activities">全部记录</button></div><div class="table-wrap" id="recent-table"></div></section>
@@ -37,6 +42,17 @@
 <section id="activities" class="tab-content" hidden><section class="section"><div class="filters"><label>搜索<input id="activity-search" type="search" placeholder="activity_id / 名称" autocomplete="off"></label><label>训练类型<select id="activity-type"><option value="">全部类型</option></select></label></div><div class="table-wrap" id="activity-table"></div><div class="pager"><button class="command" id="prev-page">上一页</button><span id="page-info" aria-live="polite"></span><button class="command" id="next-page">下一页</button></div></section></section>
 <section id="health" class="tab-content" hidden><section class="section"><div class="section-heading"><div><h2>健康数据回顾</h2><p>观测日期汇总，不重演当时的跑前决策。身体电量为当日最后有效采样。</p></div><label>趋势指标<select id="health-metric"><option value="weekly_hrv">HRV 7 日均值 / ms</option><option value="hrv">夜间 HRV / ms</option><option value="sleep_hours">睡眠 / 小时</option><option value="rhr">静息心率 / bpm</option><option value="stress">压力</option><option value="battery">身体电量</option></select></label></div><div class="canvas-wrap"><canvas id="health-chart" aria-label="健康指标历史趋势" role="img"></canvas></div><p class="plot-note" id="health-hint"></p><div class="table-wrap" id="health-table"></div></section></section>
 <section id="reports" class="tab-content" hidden><section class="section"><div class="filters"><label>搜索报告<input id="report-search" type="search" placeholder="标题 / activity_id" autocomplete="off"></label><label>报告类型<select id="report-type"><option value="">全部报告</option></select></label></div><p class="meta" id="report-count"></p><div class="report-list" id="report-list"></div></section></section>
+<section id="knowledge" class="tab-content" hidden>
+<section class="section"><div class="section-heading"><h2>每日教练</h2><span id="knowledge-date" class="meta"></span></div><div class="status" id="knowledge-status"></div><div id="knowledge-warnings" class="meta"></div></section>
+<section class="section"><div class="section-heading"><h2>训练课表和训练计划</h2><button class="quiet" data-view="planning">查看后续安排</button></div><p class="meta">已确认安排与待确认建议分别列示，比赛目标不代表当前能力。</p></section>
+<section class="section"><div class="section-heading"><h2>档案与证据</h2><span class="meta">当前本地档案，不是历史时点回放</span></div><div class="report-list" id="knowledge-documents"></div></section>
+</section>
+<section id="planning" class="tab-content" hidden>
+<p id="planning-status" class="status"></p>
+<section class="section"><div class="section-heading"><h2>比赛目标</h2><span id="planning-date" class="meta"></span></div><div id="planning-goals" class="plan-targets"></div></section>
+<section class="section"><div class="section-heading"><h2>待确认的具体课表</h2><span class="meta">历史教练建议，未自动加入有效课表</span></div><div id="planning-drafts" class="table-wrap plan-table"></div></section>
+<section class="section"><div class="section-heading"><h2>逐日课表</h2><label>规划范围<select id="planning-horizon"><option value="7">未来一周</option><option value="14">未来两周</option><option value="28" selected>未来四周</option></select></label></div><div id="planning-schedule" class="table-wrap plan-table"></div></section>
+</section>
 <p class="footnote" id="footnote"></p>
 </div>
 <section id="reader" class="reader" hidden><div class="reader-top"><button id="close-report" class="command">返回列表</button><a id="report-original">打开原始 Markdown</a></div><div id="report-document" class="document"></div></section>
@@ -50,11 +66,11 @@ const fmt=(v,n=1)=>v==null?'未知':Number(v).toFixed(n);
 const pace=v=>v==null?'未知':Math.floor(Math.round(v)/60)+':'+String(Math.round(v)%60).padStart(2,'0');
 const duration=v=>{if(v==null)return '未知';const s=Math.round(v);return Math.floor(s/3600)+':'+String(Math.floor(s%3600/60)).padStart(2,'0')+':'+String(s%60).padStart(2,'0');};
 const state={view:'overview',from:D.start,to:D.until,page:0,previousView:'overview'};
-const titles={overview:'训练概览',activities:'训练记录',health:'恢复趋势',reports:'报告库'};
+const titles={overview:'训练概览',activities:'训练记录',health:'恢复趋势',reports:'报告库',knowledge:'教练知识库',planning:'训练课表和训练计划'};
 const inRange=day=>day>=state.from&&day<=state.to;
 const days=()=>D.days.filter(x=>inRange(x.day));
 const runs=()=>D.activities.filter(x=>inRange(x.day));
-const reportByKey=new Map(D.reports.map(x=>[x.key,x]));
+const reportByKey=new Map([...D.reports,...(D.knowledge?.documents||[])].map(x=>[x.key,x]));
 const setText=(id,text)=>$(id).textContent=text;
 $('since').value=D.start;$('until').value=D.until;
 for(const id of ['since','until']){$(id).min=D.start;$(id).max=D.until;}
@@ -65,7 +81,10 @@ $('warnings').innerHTML=D.warnings.map(x=>'<p>'+esc(x)+'</p>').join('');$('warni
 setText('footnote','仅包含本地已同步记录。排除 '+D.duplicates_excluded+' 个精确重复副本，未删除原始数据。训练类型来自已有报告或明确校准，未知不猜测。看板只展示已有结果，不诊断恢复、伤病或能力。');
 for(const type of [...new Set(D.activities.map(a=>a.type))].sort()){const o=new Option(type,type);$('activity-type').add(o);}
 for(const type of [...new Set(D.reports.map(a=>a.category))].sort())$('report-type').add(new Option(type,type));
-function showView(view){state.view=view;$('workspace').hidden=false;$('reader').hidden=true;setText('page-title',titles[view]);for(const key of Object.keys(titles))$(key).hidden=key!==view;document.querySelectorAll('nav [data-view]').forEach(b=>{if(b.dataset.view===view)b.setAttribute('aria-current','page');else b.removeAttribute('aria-current');});render();}
+function showView(view){state.view=view;$('workspace').hidden=false;$('reader').hidden=true;setText('page-title',titles[view]);for(const key of Object.keys(titles))$(key).hidden=key!==view;$('date-filter').hidden=['knowledge','planning'].includes(view);document.querySelectorAll('nav [data-view]').forEach(b=>{if(b.dataset.view===view)b.setAttribute('aria-current','page');else b.removeAttribute('aria-current');});render();if(view==='knowledge')renderKnowledge();if(view==='planning')renderPlanning();}
+function renderKnowledge(){const k=D.knowledge||{status:'missing',documents:[],plan:[],warnings:[]};setText('knowledge-date',k.as_of?'资料截至 '+k.as_of:'尚未生成');const labels={ready:'本地资料整理完成，教练分析待完成',partial:'本轮整理部分失败',stale:'资料已过期或来源已变更',invalid:'阅读包校验失败',missing:'尚无每日阅读包',unavailable:'知识库暂不可用'};setText('knowledge-status',(labels[k.status]||'状态未知')+'。同步完整性未核验；不是训练许可。');$('knowledge-warnings').innerHTML=k.warnings.map(w=>'<p>'+esc(w)+'</p>').join('');$('knowledge-documents').innerHTML=k.documents.length?k.documents.map(r=>'<div class="report-item"><div>'+reportButton(r.key,r.title)+'<div class="meta">'+esc(r.category)+'</div></div><a href="'+esc(r.href)+'">原文</a></div>').join(''):'<p class="empty">尚无可读取的档案。</p>';}
+function scheduleTable(rows){return rows.length?'<table><thead><tr><th>日期</th><th>安排</th><th>具体内容 / 剂量</th><th>状态与依据</th></tr></thead><tbody>'+rows.map(r=>'<tr><td>'+esc(r.day)+'<br><span class="meta">周'+esc(r.weekday)+'</span></td><td>'+esc(r.kind)+'</td><td>'+esc(r.dose)+'</td><td>'+esc(r.state)+'<br>'+reportButton(r.source_key,'计划来源')+'</td></tr>').join('')+'</tbody></table>':'<p class="empty">暂无可用课表；不自动补填训练。</p>';}
+function renderPlanning(){const k=D.knowledge||{plan:[],outlook:[],warnings:[]};const future=(k.plan||[]).filter(r=>r.day>D.until);$('planning-preview').innerHTML=scheduleTable(future.slice(0,7));$('planning-schedule').innerHTML=scheduleTable(future.slice(0,Number($('planning-horizon').value)));setText('planning-date','看板截至 '+D.until+' · 课表依据 '+(k.as_of||'未知'));setText('planning-status',(k.status==='ready'?'已确认的是训练结构；未确认的公里数、组数和配速仍留空。':'资料存在缺失、过期或校验问题；以下不能作为最新训练许可。')+(k.warnings?.length?' '+k.warnings.join(' '):''));const items=k.outlook||[];$('planning-goals').innerHTML=items.filter(r=>r.kind==='goal').map(r=>'<div class="plan-target"><strong>'+esc(r.title)+'</strong><div class="meta">'+esc(r.date)+' · 距快照日期 '+esc(r.days_away)+' 天</div><p>'+esc(r.detail)+'</p><div class="meta">'+esc(r.conditions)+'</div>'+reportButton(r.source_key,'目标依据')+'</div>').join('')||'<p class="empty">尚未登记后续比赛目标。</p>';const drafts=items.filter(r=>r.kind==='historical_proposal');$('planning-drafts').innerHTML=drafts.length?'<table><thead><tr><th>计划日期</th><th>训练内容</th><th>执行前提</th><th>状态 / 来源</th></tr></thead><tbody>'+drafts.map(r=>'<tr><td>'+esc(r.date||'未排期')+'</td><td><strong>'+esc(r.title)+'</strong><br>'+esc(r.detail)+'</td><td>'+esc(r.conditions)+'</td><td>'+esc(r.status)+'<br>'+reportButton(r.source_key,'查看原建议')+'</td></tr>').join('')+'</tbody></table>':'<p class="empty">暂无已登记的待确认建议。</p>';}
 function reportButton(key,label){return key&&reportByKey.has(key)?'<button class="quiet" data-report="'+esc(key)+'">'+esc(label)+'</button>':'';}
 function activityTable(items){if(!items.length)return '<p class="empty">此范围没有匹配的跑步记录，不推断为休息。</p>';return '<table><thead><tr><th>日期 / activity_id</th><th>训练</th><th>距离 km</th><th>计时时长</th><th>配速 /km</th><th>均心</th><th>报告</th></tr></thead><tbody>'+items.map(a=>'<tr><td>'+esc(a.day)+'<span class="id">'+esc(a.id)+'</span></td><td class="name"><span class="type">'+esc(a.type)+'</span><br>'+esc(a.name)+'</td><td class="number">'+fmt(a.km,2)+'</td><td class="number">'+duration(a.duration_s)+'</td><td class="number">'+pace(a.pace)+'</td><td class="number">'+fmt(a.hr,0)+'</td><td>'+reportButton(a.daily,'单次报告')+(a.daily&&a.comparison?'<br>':'')+reportButton(a.comparison,'同类对比')+(!a.daily&&!a.comparison?'<span class="meta">未生成</span>':'')+'</td></tr>').join('')+'</tbody></table>';}
 function renderActivities(){const q=$('activity-search').value.trim().toLowerCase(),type=$('activity-type').value;const items=runs().filter(a=>(!type||a.type===type)&&(!q||(a.id+' '+a.name).toLowerCase().includes(q)));const pages=Math.max(1,Math.ceil(items.length/20));state.page=Math.min(state.page,pages-1);$('activity-table').innerHTML=activityTable(items.slice(state.page*20,state.page*20+20));setText('page-info',items.length+' 条 · '+(state.page+1)+' / '+pages);$('prev-page').disabled=state.page===0;$('next-page').disabled=state.page>=pages-1;}
@@ -81,7 +100,8 @@ $('date-filter').onsubmit=e=>{e.preventDefault();const a=$('since').value,b=$('u
 $('reset-range').onclick=()=>{$('since').value=D.start;$('until').value=D.until;state.from=D.start;state.to=D.until;state.page=0;setText('range-error','');render();};
 for(const id of ['activity-search','activity-type'])$(id).addEventListener('input',()=>{state.page=0;renderActivities();});for(const id of ['report-search','report-type'])$(id).addEventListener('input',renderReports);
 $('prev-page').onclick=()=>{state.page--;renderActivities();};$('next-page').onclick=()=>{state.page++;renderActivities();};$('health-metric').onchange=renderHealth;
-let resizeTimer;window.addEventListener('resize',()=>{clearTimeout(resizeTimer);resizeTimer=setTimeout(render,120);});render();
+$('planning-horizon').onchange=renderPlanning;
+let resizeTimer;window.addEventListener('resize',()=>{clearTimeout(resizeTimer);resizeTimer=setTimeout(render,120);});render();renderPlanning();
 </script>
 </body>
 </html>

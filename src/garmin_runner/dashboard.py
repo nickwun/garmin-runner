@@ -140,7 +140,8 @@ def _metric_rows(conn, tables: set, start: date, end: date, tz: ZoneInfo):
     return list(days.values())
 
 
-def build_dashboard(settings, until: date, days: int = 56) -> dict:
+def build_dashboard(settings, until: date, days: int = 56, *, project_root: Path | None = None) -> dict:
+    from garmin_runner.knowledge_dashboard import dashboard_knowledge
     start = until - timedelta(days=days - 1)
     root = settings.storage.reports_dir
     reports, skipped = _reports(root, start, until)
@@ -242,7 +243,8 @@ def build_dashboard(settings, until: date, days: int = 56) -> dict:
             "start": start.isoformat(), "until": until.isoformat(), "timezone": settings.recovery.timezone,
             "activities": activities, "days": metrics, "reports": reports, "readiness": readiness,
             "duplicates_excluded": duplicates, "warnings": warnings,
-            "latest_run": newest_run, "latest_health": newest_health}
+            "latest_run": newest_run, "latest_health": newest_health,
+            "knowledge": dashboard_knowledge(project_root or root.resolve().parent, root, until)}
 
 
 def write_dashboard(payload: dict, reports_dir: Path) -> Path:

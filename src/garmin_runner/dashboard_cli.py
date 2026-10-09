@@ -33,7 +33,7 @@ def register_dashboard_command(report_app: typer.Typer):
             if end > today:
                 typer.echo("不能生成未来日期的训练看板。", err=True)
                 raise typer.Exit(2)
-            result = build_dashboard(settings, end, days)
+            result = build_dashboard(settings, end, days, project_root=Path.cwd())
             path = write_dashboard(result, settings.storage.reports_dir)
         except typer.Exit:
             raise

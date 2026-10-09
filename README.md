@@ -391,6 +391,23 @@ garmin-runner knowledge context --as-of YYYY-MM-DD --days 14
 这是当前本地数据的日期回顾，不是严格的历史跑前回放。工具不联网、不调用 LLM、不改原始数据、不批准新处方，也不修改定时任务。
 输入格式和版本边界见 [教练知识库使用说明](docs/knowledge-coaching.md)。全部输入及产物仍在被忽略的 `knowledge/` 内。
 
+### 每日教练资料与看板（知识库第三阶段）
+
+```bash
+garmin-runner knowledge daily --as-of today
+garmin-runner knowledge daily --as-of YYYY-MM-DD --days 14
+```
+
+在现有 sync、health sync 与新增活动 analyze 之后运行：按配置时区解析日期，依次更新派生索引、生成独立教练阅读包、刷新本地看板。
+不联网、不重新计算生理指标、不覆盖个性化日报、不自动批准或下发课表。该命令成功只表示资料整理完成，不能证明 Garmin 同步完整，也不代表 Codex 已完成教练分析。
+
+看板新增「教练知识库」，可查看已确认交替结构、完整训练、比赛档案、长期报告索引和待确认问题；档案支持页内预览和本地原文链接。
+「课表计划」单独展示未来四周逐日安排与比赛目标，首页预览未来七天。结构确认不代表训练剂量确认；整堂距离与主段距离分开，未排期的建议不自动绑定训练日。
+本地 `knowledge/plans/outlook.json` 登记比赛目标及历史教练建议，附来源原话与哈希；建议单列为待确认，不能覆盖 `plans/versions/` 中的已确认计划。
+窗口筛选仅作用于训练数据；知识库明确显示自己的资料日期。无阅读包、过期、来源变更和部分失败分别显示，不用旧包冒充本轮成功。
+运行状态保存在忽略的 `knowledge/coach_context/daily/latest.json`；全部阅读包保留，原始档案不改写。
+现有定时任务需另行授权后更新，不会因安装此版本自动改动。具体说明见 [教练知识库使用说明](docs/knowledge-coaching.md)。
+
 ## 开发
 
 运行测试：

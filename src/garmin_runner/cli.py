@@ -52,6 +52,7 @@ from garmin_runner.comparison_cli import register_comparison_commands
 from garmin_runner.dashboard_cli import register_dashboard_command
 from garmin_runner.knowledge import knowledge_app
 from garmin_runner.knowledge_coach import register_knowledge_coach
+from garmin_runner.knowledge_daily import register_knowledge_daily
 
 app = typer.Typer(help="Local-first Garmin running data sync and analysis toolkit.")
 report_app = typer.Typer(help="Generate deterministic training reports.")
@@ -60,6 +61,7 @@ app.add_typer(report_app, name="report")
 app.add_typer(coach_app, name="coach")
 app.add_typer(knowledge_app, name="knowledge")
 register_knowledge_coach(knowledge_app)
+register_knowledge_daily(knowledge_app)
 register_health_commands(app, report_app)
 register_comparison_commands(app)
 register_dashboard_command(report_app)
