@@ -373,6 +373,24 @@ garmin-runner knowledge index --as-of YYYY-MM-DD
 活动条数不等于训练堂数，关联热身、主训练、冷身需有明确证据。
 聊天原话和旧教练建议分别保存，建议不自动视为已确认课表。现有定时任务尚不更新知识库索引。
 
+### 教练阅读包与计划版本（知识库第二阶段）
+
+```bash
+garmin-runner knowledge plan-record --file knowledge/plans/inbox/plan.json
+garmin-runner knowledge context --as-of YYYY-MM-DD --days 14
+```
+
+计划 JSON 登记在 `knowledge/plans/versions/`，必须带原话来源、SHA-256、记录日、生效范围与版本 ID。
+草案、本人确认、取消分别保存；修订使用新 ID 和 `supersedes`，同 ID 只允许完全相同内容的幂等登记。
+结构计划不包含配速或里程剂量；支持按周交替，未指定日期保留未知。文字来源是否真的支持计划内容仍须人工审核，哈希校验不是语义批准。
+
+阅读包在 `knowledge/coach_context/generated/` 每次生成独立 JSON/Markdown，不覆盖旧包。
+包含近期设备记录、去重后的逐日跑量、本人反馈、计划对照、后续两周已确认结构、来源原文与历史报告链接。
+人工资料由本地 `knowledge/coach_context/catalog.json` 白名单登记，保留作者类别、记录日期及哈希；变更或缺失时警告，不悄悄引用。
+健康部分仅列覆盖，不据此判断恢复；没有跑步记录不当作全休，没有主段证据不判断质量课完成。
+这是当前本地数据的日期回顾，不是严格的历史跑前回放。工具不联网、不调用 LLM、不改原始数据、不批准新处方，也不修改定时任务。
+输入格式和版本边界见 [教练知识库使用说明](docs/knowledge-coaching.md)。全部输入及产物仍在被忽略的 `knowledge/` 内。
+
 ## 开发
 
 运行测试：

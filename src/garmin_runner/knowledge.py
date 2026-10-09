@@ -94,16 +94,24 @@ def collect_index(settings, root: Path, as_of: date) -> dict:
                             "已有报告保留其原始生成日期和判断，不能当成当前建议。"]}
 
 
-def write_index(settings, root: Path, as_of: date) -> Path:
+def private_knowledge_path(root: Path, relative: str) -> Path:
+    """Check Git privacy and every parent before writing private knowledge."""
     root = root.resolve()
-    output = root / "knowledge" / "index"
-    # Refuse to export private records until the repository's privacy gate is active.
-    ignored = subprocess.run(["git", "check-ignore", "-q", "knowledge/"], cwd=root)
+    ignored = subprocess.run(["git", "check-ignore", "-q", "knowledge/"], cwd=root, capture_output=True)
     tracked = subprocess.run(["git", "ls-files", "-z", "--", "knowledge"], cwd=root, capture_output=True)
     if ignored.returncode or tracked.returncode or tracked.stdout:
         raise ValueError("请先忽略 knowledge/ 并确认它未被 Git 跟踪；未导出个人数据。")
-    if (root / "knowledge").is_symlink() or output.is_symlink() or not output.resolve().is_relative_to(root):
+    output = root / "knowledge" / relative
+    if not output.resolve().is_relative_to(root / "knowledge"):
         raise ValueError("知识库输出目录不安全。")
+    if any(p.is_symlink() for p in (output, *output.parents) if p != root and p.is_relative_to(root)):
+        raise ValueError("知识库输出目录不安全。")
+    return output
+
+
+def write_index(settings, root: Path, as_of: date) -> Path:
+    root = root.resolve()
+    output = private_knowledge_path(root, "index")
     payload = collect_index(settings, root, as_of)
     private_json(output / "activities.json", payload)
     rows = payload["activities"]
