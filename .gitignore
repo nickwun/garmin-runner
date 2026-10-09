@@ -1,5 +1,7 @@
 .DS_Store
 .env
+.env.*
+!.env.example
 .venv/
 __pycache__/
 *.py[cod]
@@ -11,6 +13,7 @@ config/athlete.yaml
 config/running_background.md
 data/
 reports/
+knowledge/
 *.sqlite
 *.sqlite3
 *.db
@@ -21,5 +24,16 @@ reports/
 *.cookies
 *.token
 *.tokens
+token
+tokens
+cookie
+cookies
+token.json
+tokens.json
+cookie.json
+cookies.json
+*.[fF][iI][tT]
+*.[tT][cC][xX]
+*.[gG][pP][xX]
 .garminconnect/
 garminconnect_tokens/
